@@ -1,0 +1,3 @@
+[submodule "salt"]
+	path = salt
+	url = https://github.com/thoughtpolice/salt.git

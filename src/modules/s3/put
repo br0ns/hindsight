@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+
+source $(dirname $0)/conf
+
+cat > s3-$$.tmp
+s3cmd put s3-$$.tmp "s3://${BUCKET}/${DIR}/$1"
+
+rm -f s3-$$.tmp

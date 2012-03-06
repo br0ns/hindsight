@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+
+source $(dirname $0)/conf
+
+cat > "$DIR/$1-part"
+mv "$DIR/$1-part" "$DIR/$1"

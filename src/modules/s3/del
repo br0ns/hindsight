@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+
+source $(dirname $0)/conf
+
+s3cmd del "s3://${BUCKET}/${DIR}/$1"

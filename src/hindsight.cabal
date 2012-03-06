@@ -1,0 +1,100 @@
+name:               hindsight
+version:            0.1
+homepage:           https://github.com/kfl/backup-hs
+synopsis:           A backup system
+description:        A backup system
+category:           System
+license:            OtherLicense
+license-file:       LICENSE
+author:             Morten Brøns, Johan Brinch
+maintainer:         mortenbp@gmail.com, brinchj@gmail.com
+data-files:         README TODO.org CONFIG INSTALL
+cabal-version:      >= 1.6
+build-type:         Custom
+stability:          Experimental
+
+flag testing
+    description: Testing mode, only build minimal components
+    default: False
+
+executable hindsight
+    main-is:
+        Main.hs
+
+    other-modules:
+        Backup
+        Channel
+        Process
+        Config
+        Rollsum
+        Supervisor
+        Stat
+        Util
+        Crypto.Flat
+        Crypto.Simple
+        Data.BTree.BTree
+        Data.BTree.Class
+        Data.BTree.Types
+        Data.BTree.Cache.Class
+        Data.BTree.Cache.STM
+        Data.BTree.HashTable.STM
+        Data.BTree.KVBackend.CachedExternal
+        Data.BTree.KVBackend.Class
+        Data.BTree.KVBackend.Files
+        Data.UUID
+        Data.Pickle
+        Process.Log
+        Process.BlobStore
+        Process.External
+        Process.HashStore
+        Process.Index
+        Process.KeyStore
+
+    c-sources: cbits/rollsum.c cbits/term.c
+
+    build-depends:
+        base == 4.*, hslogger == 1.*
+        ,
+        -- control
+        mtl == 2.*, stm == 2.2.*
+        ,
+        -- util
+        MissingH == 1.1.*, old-time == 1.*, process == 1.*, random == 1.*,
+        time == 1.*, utility-ht == 0.0.7.*
+        ,
+        -- data structures
+        array == 0.4.*, containers == 0.4.*, hashable == 1.*
+        ,
+        -- packing
+        snappy == 0.2.*, tar == 0.3.*, zlib == 0.5.*
+        ,
+        -- conduit
+        conduit == 0.2.*
+        ,
+        -- bytestring
+        bytestring == 0.9.*, base16-bytestring == 0.1.*, base64-bytestring == 0.1.*,
+        cereal == 0.3.*
+        ,
+        -- unix
+        unix == 2.5.*, Unixutils == 1.*
+        ,
+        -- files
+        directory == 1.*, filepath == 1.*
+        ,
+        -- crypto
+        crypto-api == 0.8.*, cprng-aes == 0.2.*, entropy >= 0.2, salt == 0.0,
+        scrypt == 0.3.*, skein == 0.1.*
+
+    if true
+        ghc-options:    -funbox-strict-fields -Wall -fno-warn-hi-shadowing -fno-warn-name-shadowing
+                        -fno-warn-missing-signatures -threaded -O2 -rtsopts
+                        -with-rtsopts "-A10m -N"
+
+    ghc-prof-options:   -prof -auto-all
+    extensions:         CPP
+
+    if flag(testing)
+        cpp-options:    -DTESTING
+        build-depends:  QuickCheck == 2.4.*
+        ghc-options:    -Wall
+

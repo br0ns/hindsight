@@ -1,0 +1,10 @@
+#!/usr/bin/env python
+
+from sys     import argv, stdout
+from couchdb import Server
+from base64  import b64decode
+
+s  = Server()
+db = s['hindsight']
+
+stdout.write(b64decode(db.get(argv[1])['data']))

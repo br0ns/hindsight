@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+
+source $(dirname $0)/conf
+
+rm $DIR/$1

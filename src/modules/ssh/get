@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+
+source $(dirname $0)/conf
+
+ssh $SERVER "cat $DIR/$1"

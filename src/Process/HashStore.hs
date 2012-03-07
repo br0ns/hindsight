@@ -12,7 +12,7 @@ module Process.HashStore
        )
        where
 
-import Util (byteStringToFileName, safeReadFile)
+import Util (byteStringToFileName, safeReadFileWith)
 
 import System.Directory
 import System.FilePath
@@ -41,13 +41,13 @@ import Data.List ((\\))
 import Data.Maybe
 import Text.Read.HT
 
-import Crypto.Flat (skein256)
+import Crypto.Flat (skein256, Skein256)
 
 -- import Data.Interned
 -- import Data.Interned.ByteString
 
 -- ID
-type ID = ByteString
+type ID = Skein256
 
 -- Message
 type Value   = ByteString
@@ -64,9 +64,9 @@ recover rollback statCh idxCh extCh = do
       send statCh $ Stats.Say "  Rolling back dangling hashes"
       forM_ files $ \file -> do
         let path = rollback </> file
-        hashes <- (either (const []) id . decode) `fmap` safeReadFile path
+        hashes <- (either (const []) id . decode) `fmap` safeReadFileWith id path
         forM_ hashes $ \hash -> do
-          send statCh $ Stats.SetMessage $ B.unpack (B64.encode hash)
+          send statCh $ Stats.SetMessage $ show hash
           send idxCh $ Idx.Delete hash
         flushChannel idxCh
         -- sendBlock extCh $ Ext.Del $ fileNameToByteString file
@@ -75,10 +75,10 @@ recover rollback statCh idxCh extCh = do
       flushChannel idxCh
   where
     f hash Nothing = do
-      send statCh $ Stats.SetMessage $ B.unpack (B64.encode hash)
+      send statCh $ Stats.SetMessage $ show hash
       send idxCh $ Idx.Delete hash
     f hash _ =
-      send statCh $ Stats.SetMessage $ B.unpack (B64.encode hash) :: IO ()
+      send statCh $ Stats.SetMessage $ show hash :: IO ()
 
 hashStore statCh idxCh bsCh = new (hSup, hMsg, info "Started", hFlush)
   where

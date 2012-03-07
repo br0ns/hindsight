@@ -25,10 +25,11 @@ import qualified Data.ByteString.Char8  as B
 import qualified Data.ByteString.Base64 as B64
 import qualified Data.ByteString.Lazy   as BL
 import Data.Word
-import Util (atomicFileWrite, safeReadFile, safeWriteFile)
+import Util (safeReadFileWith, safeWriteFileWith)
 
 import qualified Data.BTree.KVBackend.Class as KV
-import Codec.Compression.Snappy
+
+import Codec.Compression.Zlib
 
 type Param = FilePath
 
@@ -51,18 +52,19 @@ filePath path =
 
 
 store k v = do path <- filePath k
-               e <- liftIO $! try $! safeWriteFile path bin
+               e <- liftIO $! try $! safeWriteFileWith compress' path bin
                case e of
                  Left (e :: IOError) -> do -- File is probably locked
                    liftIO $ threadDelay 1
                    store k v
                  Right _ -> return ()
   where
-    bin = compress $ encode v
+    bin = encode v
 
 fetch k = do path <- filePath k
-             liftIO $ do bin <- safeReadFile path
-                         return $! either (const Nothing) Just $ decode $ decompress bin
+             liftIO $ do bin <- safeReadFileWith decompress' path
+                         return $ either (const Nothing) Just $
+                           decode bin
                `catch` \(_ :: IOError) -> return Nothing
 
 remove k = do path <- filePath k
@@ -70,10 +72,14 @@ remove k = do path <- filePath k
                 `catch` \(_ :: IOError) -> return ()
 
 
+compress' bs = do
+  B.concat $ BL.toChunks $ compress $ BL.fromChunks [bs]
+
+decompress' bs = do
+  B.concat $ BL.toChunks $ decompress $ BL.fromChunks [bs]
+
+
 instance (Show k, Serialize k, Serialize v) => KV.KVBackend FilesKV k v where
   store  k v = store k v
   fetch  k   = fetch k
   remove k   = remove k
-
-
-

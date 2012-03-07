@@ -11,7 +11,7 @@ module Process.BlobStore
 import Process
 import Supervisor
 
-import Util (byteStringToFileName, safeWriteFile, safeReadFile)
+import Util (byteStringToFileName, safeWriteFileWith)
 
 import System.Directory
 import System.FilePath
@@ -27,18 +27,19 @@ import Data.Pickle
 import qualified Data.Serialize as Ser
 
 import Data.UUID
+import Crypto.Flat (Skein256)
 
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Lazy as BL
+import qualified Data.List as L
 
+import Data.Word
 
 -- ID
-type Offset = Int
-type Length = Int
+type Index = Word32
 
-
-newtype ID  = ID { unID :: (UUID, Offset, Length) }
+newtype ID  = ID { unID :: (UUID, Index) }
               deriving (Show, Eq)
 
 instance Ser.Serialize ID where
@@ -47,7 +48,7 @@ instance Ser.Serialize ID where
 
 -- Message
 type Value   = ByteString
-type Hash    = ByteString
+type Hash    = Skein256
 data Message
   = Store !Hash !Value
   | Retrieve !ID !(Reply Value)
@@ -56,56 +57,56 @@ blobStore workdir minBlobSize hiCh extCh =
   newM (hSup, hMsg, info "Started", hFlush, run)
   where
     run m = do blobId <- uuid
-               void $ runStateT m (blobId, [], BL.empty)
+               void $ runStateT m (blobId, [])
 
     flush =
-      do (blobId, hashids, blob) <- get
-         let callback = liftIO $ do
-               mapM_ (\(hash, id) -> do
+      do (blobId, blob') <- get
+         let blob = L.reverse blob'
+             callback = liftIO $ do
+               mapM_ (\((hash, _), idx) -> do
                          sendReply hiCh $ Idx.Modify
-                           (\_ Nothing -> Just id)
+                           (\_ Nothing -> Just $! ID (blobId, idx))
                            hash
-                           (Just id)
-                     ) hashids
+                           (Just $! ID (blobId, idx))
+                     ) $ zip blob [0..]
                -- This line is expensive, but might be a good idea if the system crashes often...
                -- sendBlock hiCh Idx.Flush
                unlock
              lockfile = workdir </> byteStringToFileName (encode blobId)
-             lock = liftIO $ safeWriteFile lockfile $ encode $ map fst hashids
+             lock = liftIO $ safeWriteFileWith id lockfile $ encode $ map fst blob
              unlock = removeFile lockfile
-         info $ "Flushing: " ++ show (BL.length blob)
-         unless (BL.null blob) $ do
+         length <- size
+         info $ "Flushing: " ++ show length
+         unless (L.null blob) $ do
            lock
            send extCh $ Ext.PutCallback
              callback
              (encode blobId)
-             (B.concat $ BL.toChunks blob)
+             (encode $ map snd blob)
          blobId' <- liftIO uuid
-         put (blobId', [], BL.empty)
+         put (blobId', [])
          info "Done!"
 
     hSup Stop = info "Goodbye."
     hSup m = warning $ "Ignoring supervisor messages." ++ show m
 
     hMsg msg = {-# SCC "blobStore" #-}
-      do blobId <- gets $ \(x, _, _) -> x
+      do blobId <- gets fst
          case msg of
            Store hash v ->
-             do offset <- fmap fromIntegral size
-                let !id = ID (blobId, offset, B.length v)
-                store hash id v
+             do store hash v
                 -- flush?
-                when (offset + B.length v >= minBlobSize)
+                offset <- fmap fromIntegral size
+                when (fromIntegral offset + B.length v >= minBlobSize)
                   flush
-           Retrieve (ID (blobId, offset, len)) rep ->
+           Retrieve (ID (blobId, idx)) rep ->
              do blob <- sendReply extCh $ Ext.Get $ encode blobId
-                replyTo rep $ B.take (fromIntegral len)
-                            $ B.drop (fromIntegral offset) blob
+                replyTo rep $! (!! (fromIntegral idx)) $ either error id $ decode blob
       where
-        store hash id v = do let f = flip BL.append $! BL.fromChunks [v]
-                             modify $ \(blobId, hashIds, blob) ->
-                               (blobId, (hash, id) : hashIds, f blob)
-        size    = get >>= (\(_, _, blob) -> return $ BL.length blob)
+        store hash v = do modify $ \(blobId, blob) -> (blobId, (hash, v) : blob)
+
+    size    = do (_, blob) <- get
+                 return $ L.foldl' (\l c -> l + (B.length $ snd c)) 0 blob
 
     hFlush = do
       flush

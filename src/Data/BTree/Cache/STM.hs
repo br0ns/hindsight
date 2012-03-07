@@ -27,8 +27,6 @@ import Control.Monad
 import Control.Monad.Trans
 import Control.Monad.Reader
 
-import qualified Data.ByteString as B
-
 import Data.Either
 import Data.Maybe
 import Data.Time.Clock
@@ -63,7 +61,7 @@ data Ref k v = Ref {
 
 data Param m k v = Param {
     cacheSize :: Int
-  , table     :: H.HashTableSTM k (Ref k (Either B.ByteString v))
+  , table     :: H.HashTableSTM k (Ref k v)
   , toIO      :: forall a. m a -> IO a
   , flushQ    :: TVar [(k, Ref k v)]
   , timestamp :: UTCTime
@@ -116,7 +114,7 @@ getRef k = do
         case l of
           Just _ -> return ()
           Nothing -> do
-            tvst <- newTVar $ Left $ Read $ Left `fmap` bytes
+            tvst <- newTVar $ Left $ Read bytes
             tvex <- newTVar Exist
             let ref = Ref tvst tvex
             H.insert ht k ref
@@ -159,7 +157,7 @@ maybeQueue force t x =
                writeTVar qt $! x : q
 
 
-store t k v = CacheSTM $ newRef t k $! Just $! Right v
+store t k v = CacheSTM $ newRef t k $ Just v
 
 
 -- fetch :: (Eq k, NFData k, Hashable k, KV.KVBackend IO k v) => k -> CacheSTM m k v (Maybe v)
@@ -167,8 +165,8 @@ fetch k = CacheSTM $ do
   r@(Ref tv _) <- getRef k
   s <- stm $ readTVar tv
   case s of
-    Left x          -> return $! value x
-    Right (x, _, _) -> return $! value x
+    Left x          -> return $ value x
+    Right (x, _, _) -> return $ value x
 
 fetchGen n k = CacheSTM $ do
   r@(Ref tv _) <- getRef k
@@ -213,12 +211,8 @@ flipWrite _ s = s
 
 equals a b = value a == value b
 
-
-value v = case v of
-  Read    x -> either decode id `fmap` x
-  Write _ x -> either decode id `fmap` x
-  where
-    decode = either error id . S.decode
+value (Read    x) = x
+value (Write _ x) = x
 
 
 withGeneration p f = do
@@ -271,15 +265,6 @@ flushKey ht (k, r@(Ref tvst tvex)) = CacheSTM $ do
 
       Right (Write t s, n, _) | act == 0 || n /= gen ->
         (writeTVar tvst $! Left $! Write t s) >> return Nothing
-
-      Left (Write t (Just (Right v))) ->
-        (writeTVar tvst $! Left $! Write t $! Just $! Left $! S.encode v)
-        >> return Nothing
-
-      Right (Write t (Just (Right v)), n, o) ->
-        (writeTVar tvst $! Right $! (Write t $! Just $! Left $! S.encode v, n, o))
-        >> return Nothing
-
       _ -> return $ Just s
 
 
@@ -325,8 +310,7 @@ sync p = do
           s <- atomically $ readTVar tv
           case getGen gen s of
             Write _ Nothing  -> (toIO p $ KV.remove k  ) >> (atomically $ update Nothing)
-            Write _ (Just v) -> (toIO p $ KV.store  k $ either id S.encode $ v)
-                                >> (atomically $ update (Just v))
+            Write _ (Just v) -> (toIO p $ KV.store  k v) >> (atomically $ update (Just v))
             _              -> return ()
 
         update v = do
@@ -339,7 +323,7 @@ fail     = CacheSTM . throwError
 
 
 instance ( Show k, S.Serialize k, S.Serialize v, Ord k, Eq k, Eq v
-         , Hashable k, KV.KVBackend m k B.ByteString) =>
+         , Hashable k, KV.KVBackend m k v) =>
          C.Cache (CacheSTM m k v) (Param m k v) k v where
   store  = store
   fetch  = fetch

@@ -36,9 +36,10 @@ data Node k v = Leaf   (M.Map k v)
 
 
 instance (Ord k, Serialize k, Serialize v) => Serialize (Node k v) where
-  put (Leaf ks) =
+  put (Leaf m) =
     do put (0 :: Word8)
-       put ks
+       put $ M.keys  m
+       put $ M.elems m
 
   put (Branch ks rs) =
     do put (1 :: Word8)
@@ -47,7 +48,9 @@ instance (Ord k, Serialize k, Serialize v) => Serialize (Node k v) where
 
   get = do tag <- get :: Get Word8
            case tag of
-             0 -> Leaf `fmap` get
+             0 -> do ks <- get
+                     vs <- get
+                     return $ Leaf $ M.fromList $ zip ks vs
              1 -> do ks <- get
                      rs <- get
                      return $ Branch ks rs
@@ -64,5 +67,3 @@ data Param st k v = Param {
 
 newtype BTreeM m st k v a = BTreeM { runBTreeM :: ReaderT (Param st k v) m a }
                        deriving (Monad, MonadIO, MonadReader (Param st k v), Functor)
-
-

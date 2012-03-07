@@ -21,9 +21,10 @@ import Process.KeyStore (Message(..))
 
 import Data.Serialize (Serialize, encode)
 import qualified Data.ByteString.Base64 as B64
+import qualified Data.ByteString.Lazy   as BL
 
 import qualified Data.BTree.KVBackend.Class as C
-import Codec.Compression.Snappy
+import Data.BTree.KVBackend.Files (decompress')
 import Control.Concurrent
 
 type Param = Channel Message
@@ -52,7 +53,7 @@ instance (MonadIO m, C.KVBackend m k v,
         mbbs <- liftIO $ sendReply ch $ Retrieve $ B8.map fix $ B64.encode $ encode k
         case mbbs of
           Just bs -> do
-            let !v = decode' "CachedExternal" $ decompress $ unseal bs
+            let !v = decode' "CachedExternal" $ unseal $ decompress' bs
             lift $ C.store k v
             return $ Just v
           Nothing -> do

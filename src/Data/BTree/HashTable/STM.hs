@@ -61,8 +61,8 @@ modifyCount h f = do
 
 -- | /O(log n)/. Insert a key/value pair into HashTable.
 insert :: (Hashable k, Ord k) => HashTableSTM k v -> k -> v -> STM ()
-insert h !k !v = do
-     m <- readTVar b
+insert h !k !v =
+  do m <- readTVar b
      let m' = M.insert k v m
      writeTVar b $! m'
      modifyCount h (+1)
@@ -84,7 +84,7 @@ delete h !k =
      let (a, m') = M.updateLookupWithKey (\_ _ -> Nothing) k m
      when (isJust a) $
        modifyCount h (subtract 1)
-     M.lookup k m' `seq` writeTVar b m'
+     writeTVar b $! m'
   where
     b = bucket h k
 

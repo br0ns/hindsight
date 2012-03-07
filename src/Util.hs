@@ -5,8 +5,8 @@ module Util
        , fileNameToByteString
        , clearDirectory
        , atomicFileWrite
-       , safeWriteFile
-       , safeReadFile
+       , safeWriteFileWith
+       , safeReadFileWith
        , seal
        , unseal
        , safeForkIO
@@ -63,8 +63,8 @@ atomicFileWrite path bytes = do
     write tmp = do
       writeThenMove tmp `finally` (removeFile tmp `catch` \(_::IOError) -> return ())
 
-safeWriteFile path bytes = atomicFileWrite path $ seal bytes
-safeReadFile  path       = unseal `fmap` B.readFile path
+safeWriteFileWith f path bytes = atomicFileWrite path $ f $ seal bytes
+safeReadFileWith  f path       = unseal `fmap` f `fmap` B.readFile path
 
 
 seal :: B.ByteString -> B.ByteString

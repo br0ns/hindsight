@@ -124,7 +124,7 @@ instance Interval B.ByteString where
 
 
 -- | Type aliases to shorten cache type.
-type TreeBackend mc k v    = KV.KVBackend mc (Ref (Node k v)) B.ByteString -- (Node k v)
+type TreeBackend mc k v    = KV.KVBackend mc (Ref (Node k v)) (Node k v)
 
 -- | Type aliases to shorten result types.
 type TreeResult m mc k v a = BTreeM m (Cstm.Param mc (Ref (Node k v)) (Node k v)) k v a
@@ -305,13 +305,12 @@ modify :: ( MonadIO m, TreeBackend mc k v
           -> v                              -- ^ Default value is used when no other is present
           -> TreeResult m mc k v (Maybe v)  -- ^ The previous value if present
 modify f k v = do
-  -- c  <- asks state
-  -- liftIO $ Cstm.flush c
   modifyLeaf (findChild k) $ \p parent r ks -> do
   let (vOld, ks') = M.insertLookupWithKey (const f) k v ks
       lf' = Leaf ks'
   if M.size ks' <= 2 * order p
-    then C.store (Just parent) r $! lf'
+    then do unless (vOld /= Nothing && fromJust vOld == ks' M.! k) $
+              C.store (Just parent) r $! lf'
     else do Branch [bk] _ <- split p parent r lf'
             addMarked p bk
   return vOld
@@ -440,7 +439,7 @@ rebalanceProcess p = liftIO $ do
 -- | Rebalance until no more rebalancing can take place
 rebalanceAll :: (MonadIO m, Key k, Value v,
                  C.Cache (CacheSTM m2 k v) (CacheSTMP m2 k v) (Ref (Node k v)) (Node k v),
-                 TreeBackend m2 k v) =>
+                 KV.KVBackend m2 (Ref (Node k v)) (Node k v)) =>
                 BTreeM m (CacheSTMP m2 k v) k v ()
 rebalanceAll = ifM rebalance rebalanceAll $ return ()
 
@@ -449,7 +448,7 @@ rebalanceAll = ifM rebalance rebalanceAll $ return ()
 -- Moves the tree one step closer to rebalancing
 rebalance :: (Key k, Value v, MonadIO m,
               C.Cache (CacheSTM m2 k v) (CacheSTMP m2 k v) (Ref (Node k v)) (Node k v),
-              TreeBackend m2 k v) =>
+              KV.KVBackend m2 (Ref (Node k v)) (Node k v)) =>
              BTreeM m (CacheSTMP m2 k v) k v Bool
 rebalance = do p <- ask
                r <- root' p
@@ -466,7 +465,7 @@ rebalance = do p <- ask
 
 rebalance' :: (Key k, Value v, MonadIO m,
               C.Cache (CacheSTM m2 k v) (CacheSTMP m2 k v) (Ref (Node k v)) (Node k v),
-              TreeBackend m2 k v) =>
+              KV.KVBackend m2 (Ref (Node k v)) (Node k v)) =>
              BTreeM m (CacheSTMP m2 k v) k v ()
 rebalance' = do p <- ask
                 r <- root' p

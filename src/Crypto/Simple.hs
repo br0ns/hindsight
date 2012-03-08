@@ -1,10 +1,11 @@
 {-# LANGUAGE ScopedTypeVariables
   #-}
 
-module Crypto.Simple where
+module Crypto.Simple (newMasterKey, readMasterKey, encrypt, decrypt)
+       where
 
-import Crypto.NaCl.Encrypt.Stream as NaCl  (encrypt, decrypt, nonceLength, keyLength)
-import Crypto.NaCl.Nonce          as Nonce (createRandomNonce, toBS, fromBS)
+import qualified Crypto.NaCl.Encrypt.Stream as NaCl
+import qualified Crypto.NaCl.Nonce          as Nonce
 
 import Data.ByteString.Char8 as B
 import Data.Serialize as S
@@ -29,7 +30,7 @@ newtype MasterKey = MasterKey { unMasterKey :: ByteString }
 
 
 instance S.Serialize MasterKey where
-  get = MasterKey `fmap` S.getByteString keyLength
+  get = MasterKey `fmap` S.getByteString NaCl.keyLength
   put = S.putByteString . unMasterKey
 
 
@@ -40,7 +41,7 @@ newtype Key         = Key         { unKey         :: ByteString }
 
 newMasterKey :: FilePath -> IO ()
 newMasterKey path =
-  do key <- MasterKey `fmap` getEntropy keyLength
+  do key <- MasterKey `fmap` getEntropy NaCl.keyLength
      B.writeFile path $ encode key
 
 
@@ -53,12 +54,13 @@ encrypt :: MasterKey -> ByteString -> IO ByteString
 encrypt (MasterKey key) plainT = cipherT
   where
     cipherT = do
-      nonce <- createRandomNonce nonceLength
-      return $ encode (toBS nonce, NaCl.encrypt nonce plainT key)
+      nonce <- Nonce.createRandomNonce NaCl.nonceLength
+      return $ encode (Nonce.toBS nonce, NaCl.encrypt nonce plainT key)
 
 
 decrypt :: MasterKey -> CipherText -> Either String PlainText
 decrypt (MasterKey key) cipherT =
   case decode cipherT of
     Left  s                   -> Left s
-    Right (bsNonce, bsCipher) -> Right $ NaCl.decrypt (fromBS bsNonce) bsCipher key
+    Right (bsNonce, bsCipher) ->
+      Right $ NaCl.decrypt (Nonce.fromBS bsNonce) bsCipher key

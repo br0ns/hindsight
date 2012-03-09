@@ -1,1 +1,21 @@
-Don't use this yet.  The internal format is likely to change in the future.
+DISCLAIMER:
+
+Don't use the code yet.  It's still under development.  The
+format WILL change and backups will break.
+
+Feel free to check it out and play around with it though.
+
+
+Information on Hindsight:
+
+Poster [pdf]:
+https://github.com/mortenbp/hindsight/blob/master/docs/poster/poster.pdf?raw=true
+
+Slides from Open Source Days [pdf]:
+https://github.com/mortenbp/hindsight/blob/master/docs/osd-slides/slides.pdf?raw=true
+
+
+Authors:
+
+Johan Brinch, brinchj@gmail.com
+Morten Brøns-Pedersen, mortenbp@diku.dk

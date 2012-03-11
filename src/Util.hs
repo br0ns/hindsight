@@ -9,6 +9,7 @@ module Util
        , safeReadFileWith
        , seal
        , unseal
+       , unseal'
        , safeForkIO
        , safeKill
        , decode'
@@ -64,18 +65,23 @@ atomicFileWrite path bytes = do
       writeThenMove tmp `finally` (removeFile tmp `catch` \(_::IOError) -> return ())
 
 safeWriteFileWith f path bytes = atomicFileWrite path $ f $ seal bytes
-safeReadFileWith  f path       = unseal `fmap` f `fmap` B.readFile path
+safeReadFileWith  f path       = unseal' `fmap` f `fmap` B.readFile path
 
 
 seal :: B.ByteString -> B.ByteString
 seal bytes = encode (hash, bytes)
   where hash = skein256 bytes
 
-unseal :: B.ByteString -> B.ByteString
-unseal bin = if hash == hash' then bytes else error "Invalid checksum!"
-  where
-    (hash', bytes) = decode' "Could not unseal data" bin
-    hash = skein256 bytes
+
+unseal' :: B.ByteString -> B.ByteString
+unseal' bin = either error id $ unseal bin
+
+unseal :: B.ByteString -> Either String B.ByteString
+unseal bin
+  | Right (hash', bytes) <- decode bin,
+    skein256 bytes == hash' = Right bytes
+  | otherwise = Left "unseal: invalid checksum"
+
 
 safeForkIO f = do
   mv  <- newEmptyMVar

@@ -11,7 +11,7 @@ module Data.BTree.KVBackend.CachedExternal where
 import Prelude hiding (writeFile, map)
 
 import Process (Channel, send, sendReply)
-import Util (unseal, decode')
+import Util (unseal', decode')
 
 import Control.Monad.Reader
 
@@ -53,7 +53,7 @@ instance (MonadIO m, C.KVBackend m k v,
         mbbs <- liftIO $ sendReply ch $ Retrieve $ B8.map fix $ B64.encode $ encode k
         case mbbs of
           Just bs -> do
-            let !v = decode' "CachedExternal" $ unseal $ decompress' bs
+            let !v = decode' "CachedExternal" $ unseal' $ decompress' bs
             lift $ C.store k v
             return $ Just v
           Nothing -> do

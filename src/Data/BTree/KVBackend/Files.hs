@@ -63,8 +63,7 @@ store k v = do path <- filePath k
 
 fetch k = do path <- filePath k
              liftIO $ do bin <- safeReadFileWith decompress' path
-                         return $ either (const Nothing) Just $
-                           decode bin
+                         return $ either (const Nothing) Just $ decode bin
                `catch` \(_ :: IOError) -> return Nothing
 
 remove k = do path <- filePath k

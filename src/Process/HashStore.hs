@@ -12,7 +12,7 @@ module Process.HashStore
        )
        where
 
-import Util (byteStringToFileName, safeReadFileWith)
+import Util (byteStringToFileName, safeReadFileWith, decode')
 
 import System.Directory
 import System.FilePath
@@ -59,12 +59,14 @@ recover rollback statCh idxCh extCh = do
   ex <- doesDirectoryExist rollback
   when ex $ do
     allfiles <- getDirectoryContents rollback
-    let files = allfiles \\ [".", ".."]
+    -- TODO: delete the tmp files
+    -- Skip ".", ".." and tmp files "foo.bar"
+    let files = filter (not . ('.' `elem`)) allfiles
     unless (null files) $ do
       send statCh $ Stats.Say "  Rolling back dangling hashes"
       forM_ files $ \file -> do
         let path = rollback </> file
-        hashes <- (either (const []) id . decode) `fmap` safeReadFileWith id path
+        hashes <- decode' "HashStore.recover" `fmap` safeReadFileWith id path
         forM_ hashes $ \hash -> do
           send statCh $ Stats.SetMessage $ show hash
           send idxCh $ Idx.Delete hash

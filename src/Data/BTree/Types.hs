@@ -30,8 +30,8 @@ instance Serialize (Ref a) where
   get = Ref `fmap` get
 
 
-data Node k v = Leaf   (M.Map k v)
-              | Branch [k] [Ref (Node k v)]
+data Node k v = Leaf   !(M.Map k v)
+              | Branch ![k] ![Ref (Node k v)]
               deriving Eq
 
 

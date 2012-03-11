@@ -362,7 +362,7 @@ modify f k v = do
 --       Cstm.liftSTM $ putTMVar tm vOld
 
 
-findChild k (Branch ks rs) =
+findChild !k (Branch ks rs) =
   let idx = L.length $ L.takeWhile (<k) ks in rs !! idx
 
 
@@ -486,7 +486,7 @@ rebalanceKey p parent r k = do
         Nothing                 -> error $ "rebalanceKey: invalid tree: " ++ show r
         Just (Leaf _)           -> return Nothing
         Just (n@(Branch ks rs)) -> do
-          let cr = findChild k n
+          let !cr = findChild k n
           mcn <- C.fetch cr
           case mcn of
             Nothing       -> error $ "rebalanceKey: invalid tree: cr = " ++ show cr

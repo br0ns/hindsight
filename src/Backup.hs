@@ -302,7 +302,7 @@ goSnapshot statCh extCh base repo path = do
       hiP  = localIndex idx $
              defaultConfigP { name = "hash index" }
   hiCh <- spawn' hiP
-  HS.recover irollback statCh hiCh extCh -- Recover from crash if necessary
+  hset <- HS.recover irollback statCh hiCh extCh -- Recover from crash if necessary
   let kiP         = localIndex repodir $
                     defaultConfigP { name = "key index (" ++ repo ++ ")" }
       bsP hCh eCh = BS.blobStore irollback maxBlob hCh eCh $
@@ -312,7 +312,8 @@ goSnapshot statCh extCh base repo path = do
       ksP hCh bCh = KS.keyStore hCh bCh $
                     defaultConfigP { name = "keystore (" ++ repo ++ ")" }
   kiCh <- spawn' kiP
-  KS.recover rrollback statCh kiCh hiCh
+  KS.recover hset rrollback statCh kiCh hiCh
+  HS.cleanup irollback
   -- take "locks"
   mapM_ (createDirectoryIfMissing True)
     [irollback, rrollback]
@@ -352,13 +353,11 @@ goSnapshot statCh extCh base repo path = do
                now <- getClockTime
                send statCh $ Stats.Completed now $ fromIntegral $ fileSize stat
     removeMissing kiCh = do
-      send kiCh $ Idx.Mapi_ $ \file _ -> do
-          ex <- try $ getSymbolicLinkStatus $ path </> B8.unpack file
-          case ex of
-            Right  _           -> return ()
-            Left  (e::IOError) -> do
-              send statCh $ SetMessage $ B8.unpack file
-              send kiCh $ Idx.Delete file
+      void $ join $ sendReply kiCh $ Idx.Mapi_ $ \file _ -> do
+        (void . getSymbolicLinkStatus) (path </> B8.unpack file)
+          `catch` \(e :: SomeException) -> do
+            send statCh $ SetMessage $ B8.unpack file
+            send kiCh $ Idx.Delete file
 
 sumFileSize = CL.fold (\n (_, stat) -> n + fileSize stat) 0
 

@@ -19,12 +19,14 @@ import Control.Exception
 
 import System.IO hiding (hFlush)
 import System.Directory
+import System.Posix.Files (getFileStatus)
 
 import Control.Monad.Trans
-import Control.Monad.Trans.Resource
+import Control.Monad.Trans.Resource hiding (try)
 import Control.Monad
 
 import Data.Maybe
+import qualified Data.Set as Set
 
 import Config (chunkMode, ChunkMode(..))
 import Process
@@ -61,17 +63,17 @@ data Contents =
   | File !FilePath        -- Read content from file
   deriving Show
 
-recover rollback statCh kidxCh hidxCh = do
+recover hset rollback statCh kidxCh hidxCh = do
   ex <- doesDirectoryExist rollback
   when ex $ do
-    send statCh $ Stats.Say "  Checking index consistency"
-    send kidxCh $ Idx.Mapi_ f
+    send statCh $ Stats.Say "  Checking index consistency!"
+    join $ sendReply kidxCh $ Idx.Mapi_ f
     flushChannel kidxCh
   where
     f key (mbvs, metaid, ids) = do
       send statCh $ Stats.SetMessage $ B.unpack key :: IO ()
-      xs <- forM (metaid : ids) $ sendReply hidxCh . Idx.Lookup
-      when (Nothing `elem` xs) $ do
+      -- xs <- forM (metaid : ids) $ sendReply hidxCh . Idx.Lookup
+      when (any (`Set.member` hset) $ metaid:ids) $
         send kidxCh $ Idx.Delete key
 
 keyStore idxCh hsCh = new (handleSup, handleMsg, info "Started", hFlush)

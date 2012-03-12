@@ -9,6 +9,7 @@ module Process.HashStore
        , ID
        , hashStore
        , recover
+       , cleanup
        )
        where
 
@@ -28,6 +29,7 @@ import qualified Process.External as Ext
 
 import Control.Monad.State
 import Control.Concurrent
+import Control.Exception (try, SomeException)
 
 import Data.UUID
 
@@ -37,6 +39,7 @@ import qualified Data.ByteString.Lazy as BL
 import qualified Data.ByteString.Base64 as B64
 import Data.Pickle
 
+import qualified Data.Set as Set
 import Data.List ((\\))
 import Data.Maybe
 import Text.Read.HT
@@ -56,31 +59,49 @@ data Message
   | Lookup !ID !(Reply (Maybe Value))
 
 recover rollback statCh idxCh extCh = do
-  ex <- doesDirectoryExist rollback
-  when ex $ do
-    allfiles <- getDirectoryContents rollback
-    -- TODO: delete the tmp files
-    -- Skip ".", ".." and tmp files "foo.bar"
-    let files = filter (not . ('.' `elem`)) allfiles
-    unless (null files) $ do
-      send statCh $ Stats.Say "  Rolling back dangling hashes"
-      forM_ files $ \file -> do
-        let path = rollback </> file
-        hashes <- decode' "HashStore.recover" `fmap` safeReadFileWith id path
-        forM_ hashes $ \hash -> do
-          send statCh $ Stats.SetMessage $ show hash
-          send idxCh $ Idx.Delete hash
-        flushChannel idxCh
-        -- sendBlock extCh $ Ext.Del $ fileNameToByteString file
-        removeFile path
-      send idxCh $ Idx.Mapi_ f
-      flushChannel idxCh
+    ei <- try $ doesDirectoryExist rollback
+    case ei of
+      Left (e :: SomeException) -> return Set.empty
+      Right False -> return Set.empty
+      Right True  -> do
+        allfiles <- getDirectoryContents rollback
+        -- Skip ".", ".." and tmp files "foo.bar"
+        let files = filter (not . ('.' `elem`)) allfiles
+        if null files then return Set.empty else do
+          send statCh $ Stats.Say "  Rolling back dangling hashes"
+          hset <- Set.fromList `fmap` concat `fmap` (
+            forM files $ \file -> do
+               let path = rollback </> file
+               hashes <- decode' "HashStore.recover" `fmap` safeReadFileWith id path
+               forM_ hashes $ \hash -> do
+                 send statCh $ Stats.SetMessage $ show hash
+                 send idxCh $ Idx.Delete hash
+               flushChannel idxCh
+               -- sendBlock extCh $ Ext.Del $ fileNameToByteString file
+               return hashes
+            )
+          join $ sendReply idxCh $ Idx.Mapi_ f
+          flushChannel idxCh
+          return hset
   where
     f hash Nothing = do
       send statCh $ Stats.SetMessage $ show hash
       send idxCh $ Idx.Delete hash
     f hash _ =
       send statCh $ Stats.SetMessage $ show hash :: IO ()
+
+cleanup rollback = do
+  ei <- try $ doesDirectoryExist rollback
+  case ei of
+    Left (e :: SomeException) -> return ()
+    Right False -> return ()
+    Right True  -> do
+      allfiles <- getDirectoryContents rollback
+      mapM_ remove allfiles
+  where
+    remove f | f `elem` [".", ".."] = return ()
+    remove f = removeFile f
+
 
 hashStore statCh idxCh bsCh = new (hSup, hMsg, info "Started", hFlush)
   where

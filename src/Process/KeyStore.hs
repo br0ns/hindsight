@@ -24,7 +24,10 @@ import System.Posix.Files (getFileStatus)
 import Control.Monad.Trans
 import Control.Monad.Trans.Resource hiding (try)
 import Control.Monad
+import Control.Monad.State.Strict
 
+import System.FilePath
+import Data.UUID
 import Data.Maybe
 import qualified Data.Set as Set
 
@@ -37,16 +40,16 @@ import qualified Process.Stats as Stats
 
 import qualified Data.ByteString.Lazy as BL
 
--- import qualified Data.Enumerator.Binary as EB
--- import qualified Data.Enumerator.List as EL
--- import Data.Enumerator hiding (mapM, sequence)
-
+import Data.List
 import Data.Conduit hiding (Stop)
 import qualified Data.Conduit.List as CL
 import qualified Data.Conduit.Binary as CB
 
+import Util
 import qualified Process.Index as Idx
 import qualified Process.HashStore as HS
+
+import Config (flushInterval)
 
 type Meta = ByteString
 type Key = ByteString
@@ -63,20 +66,26 @@ data Contents =
   | File !FilePath        -- Read content from file
   deriving Show
 
-recover hset rollback statCh kidxCh hidxCh = do
+
+recover rollback statCh kidxCh hidxCh = do
   ex <- doesDirectoryExist rollback
   when ex $ do
-    send statCh $ Stats.Say "  Checking index consistency!"
-    join $ sendReply kidxCh $ Idx.Mapi_ f
+    send statCh $ Stats.Say "  Checking index consistency"
+    allfiles <- (\\ [".", ".."]) `fmap` getDirectoryContents rollback
+    forM_ (filter (not . ('.' `elem`)) allfiles) $ \file -> do
+      key <- safeReadFileWith id $ rollback </> file
+      mh <- sendReply kidxCh $ Idx.Lookup key
+      case mh of
+        Nothing -> return ()
+        Just hs -> send kidxCh $ Idx.Delete key
     flushChannel kidxCh
-  where
-    f key (mbvs, metaid, ids) = do
-      send statCh $ Stats.SetMessage $ B.unpack key :: IO ()
-      -- xs <- forM (metaid : ids) $ sendReply hidxCh . Idx.Lookup
-      when (any (`Set.member` hset) $ metaid:ids) $
-        send kidxCh $ Idx.Delete key
+    forM_ allfiles $ \file -> do
+      removeFile file `catch` \(e :: SomeException) -> return ()
 
-keyStore idxCh hsCh = new (handleSup, handleMsg, info "Started", hFlush)
+
+keyStore workdir idxCh hsCh = newM (handleSup, handleMsg,
+                                    info "Started", hFlush,
+                                    run)
   where
     handleSup msg =
       case msg of
@@ -98,6 +107,15 @@ keyStore idxCh hsCh = new (handleSup, handleMsg, info "Started", hFlush)
             else go
         where
           go = do
+            -- check if we should flush
+            lastFlush <- get
+            now       <- liftIO $ epoch
+            when (now - lastFlush > flushInterval) $ do
+              hFlush
+              put now
+            -- create log
+            uid <- liftIO uuid
+            liftIO $ safeWriteFileWith id (workdir </> show uid) key
             let msource =
                   case content of
                     None      -> Nothing
@@ -137,7 +155,21 @@ keyStore idxCh hsCh = new (handleSup, handleMsg, info "Started", hFlush)
           chunks <- mapM (sendReply hsCh . HS.Lookup) $ ids
           replyTo rep $ B.concat `fmap` sequence chunks
 
-    hFlush = flushChannel hsCh
+    run m = do
+      now <- epoch
+      evalStateT m now
+
+    hFlush = do
+      -- flush hash store
+      flushChannel hsCh
+      -- flush key index
+      flushChannel idxCh
+      -- then remove waiting paths
+      ef <- liftIO $ try $ getDirectoryContents workdir
+      case ef of
+        Left (e :: SomeException) -> return ()
+        Right files ->
+          liftIO $ mapM_ removeFile $ map (workdir </>) $ files \\ [".", ".."]
 
 maxChunkSize :: Int
 maxChunkSize = 2^16

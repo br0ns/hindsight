@@ -267,7 +267,7 @@ sendRep ch msgf = liftIO $ do
 receive ch = liftIO . atomically $ C.receive ch
 
 replyTo :: MonadIO m => Reply a -> a -> m ()
-replyTo v = liftIO . atomically . putTMVar v
+replyTo v a = liftIO $ atomically $ putTMVar v $! a
 
 {-| Logging inside the ProcessM monad -}
 log :: MonadIO m => L.Priority -> String -> ProcessM m

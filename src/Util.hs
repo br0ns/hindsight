@@ -13,6 +13,7 @@ module Util
        , safeForkIO
        , safeKill
        , decode'
+       , epoch
        )
        where
 
@@ -30,10 +31,15 @@ import Data.UUID
 import System.FilePath ((<.>))
 import System.Directory (renameFile)
 
+import System.Time       (getClockTime)
+import System.Time.Utils (clockTimeToEpoch)
+
 import Control.Concurrent
 import Control.Exception
 
 import Crypto.Flat (skein256)
+
+epoch = clockTimeToEpoch `fmap` getClockTime
 
 byteStringToFileName k = map fixChars $ B.unpack $ B64.encode k
   where

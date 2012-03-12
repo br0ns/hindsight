@@ -9,9 +9,10 @@ module Process.HashStore
        , ID
        , hashStore
        , recover
-       , cleanup
        )
        where
+
+import Prelude hiding (catch)
 
 import Util (byteStringToFileName, safeReadFileWith, decode')
 
@@ -22,6 +23,8 @@ import System.Time
 import Process
 import Supervisor
 
+import Process.HashStoreTypes
+
 import qualified Process.Stats as Stats
 import qualified Process.BlobStore as BS
 import qualified Process.Index as Idx
@@ -29,7 +32,7 @@ import qualified Process.External as Ext
 
 import Control.Monad.State
 import Control.Concurrent
-import Control.Exception (try, SomeException)
+import Control.Exception (try, catch, SomeException)
 
 import Data.UUID
 
@@ -42,68 +45,37 @@ import Data.Pickle
 import qualified Data.Set as Set
 import Data.List ((\\))
 import Data.Maybe
-import Text.Read.HT
 
-import Crypto.Flat (skein256, Skein256)
+import Crypto.Flat (skein256)
 
--- import Data.Interned
--- import Data.Interned.ByteString
-
--- ID
-type ID = Skein256
-
--- Message
-type Value   = ByteString
-data Message
-  = Insert !Value !(Reply ID)
-  | Lookup !ID !(Reply (Maybe Value))
 
 recover rollback statCh idxCh extCh = do
     ei <- try $ doesDirectoryExist rollback
     case ei of
-      Left (e :: SomeException) -> return Set.empty
-      Right False -> return Set.empty
+      Left (e :: SomeException) -> return ()
+      Right False               -> return ()
       Right True  -> do
         allfiles <- getDirectoryContents rollback
         -- Skip ".", ".." and tmp files "foo.bar"
         let files = filter (not . ('.' `elem`)) allfiles
-        if null files then return Set.empty else do
+        unless (null files) $ do
           send statCh $ Stats.Say "  Rolling back dangling hashes"
-          hset <- Set.fromList `fmap` concat `fmap` (
-            forM files $ \file -> do
-               let path = rollback </> file
-               hashes <- decode' "HashStore.recover" `fmap` safeReadFileWith id path
-               forM_ hashes $ \hash -> do
-                 send statCh $ Stats.SetMessage $ show hash
-                 send idxCh $ Idx.Delete hash
-               flushChannel idxCh
-               -- sendBlock extCh $ Ext.Del $ fileNameToByteString file
-               return hashes
-            )
-          join $ sendReply idxCh $ Idx.Mapi_ f
-          flushChannel idxCh
-          return hset
-  where
-    f hash Nothing = do
-      send statCh $ Stats.SetMessage $ show hash
-      send idxCh $ Idx.Delete hash
-    f hash _ =
-      send statCh $ Stats.SetMessage $ show hash :: IO ()
-
-cleanup rollback = do
-  ei <- try $ doesDirectoryExist rollback
-  case ei of
-    Left (e :: SomeException) -> return ()
-    Right False -> return ()
-    Right True  -> do
-      allfiles <- getDirectoryContents rollback
-      mapM_ remove allfiles
-  where
-    remove f | f `elem` [".", ".."] = return ()
-    remove f = removeFile f
+          forM_ files $ \file -> do
+            let path = rollback </> file
+            hashes  <- decode' "HashStore.recover" `fmap` safeReadFileWith id path
+            alive <- foldM removeUnknown False hashes
+            unless alive $ do
+              send extCh $ Ext.Del $ B.pack file
+            removeFile $ rollback </> file
+      where
+        removeUnknown alive hash | alive     = return alive
+                                 | otherwise = do
+          send statCh $ Stats.SetMessage $ show hash
+          ex <- sendReply idxCh $ Idx.Lookup hash
+          return $ isJust ex
 
 
-hashStore statCh idxCh bsCh = new (hSup, hMsg, info "Started", hFlush)
+hashStore mc statCh idxCh bsCh = new (hSup, hMsg, info "Started", hFlush)
   where
     hSup m =
       case m of
@@ -111,20 +83,36 @@ hashStore statCh idxCh bsCh = new (hSup, hMsg, info "Started", hFlush)
         _ -> warning $ "Ignoring superviser message: " ++ show m
 
     hMsg !(Insert v rep) = do
-      let !id = skein256 v
-      replyTo rep id
-      mbx <- sendReply idxCh $
-             Idx.Modify (flip const) id Nothing
-      case mbx of
-        Just _ -> do
+      -- check cache
+      cached <- liftIO $ withMVar mc $ \s -> return $! id `Set.member` s
+      if cached then skip else do
+        mbx <- sendReply idxCh $ Idx.Lookup id
+        case mbx of
+          Just _ -> skip
+          Nothing -> do
+            ok <- liftIO $ modifyMVar mc $ \s -> do
+              if id `Set.member` s then
+                return (s, False)
+                else
+                return (Set.insert id s, True)
+            if not ok then skip else do
+              send bsCh $ BS.Store id v $ insert id
+              replyTo rep id
+      where
+        !id  = skein256 v
+        skip = do
+          replyTo rep id
           now <- liftIO $ getClockTime
           send statCh $ Stats.Completed now $ fromIntegral $ B.length v
-        Nothing -> send bsCh $ BS.Store id v
+        insert id blob = do
+          sendReply idxCh $! Idx.Modify (error "hashStore: exists") id blob
+          liftIO $ modifyMVar mc $ \s -> return $ (Set.delete id s, ())
+
 
     hMsg (Lookup id rep) = do
       mbx <- sendReply idxCh $ Idx.Lookup id
       case mbx of
-        Just (Just blobId) -> do
+        Just blobId -> do
           v <- sendReply bsCh $ BS.Retrieve blobId
           if skein256 v == id
             then replyTo rep $ Just v
@@ -134,4 +122,8 @@ hashStore statCh idxCh bsCh = new (hSup, hMsg, info "Started", hFlush)
           info "Could not find hash"
           replyTo rep Nothing
 
-    hFlush = flushChannel bsCh
+    hFlush = do
+      -- flush blob store
+      flushChannel bsCh
+      -- flush index
+      flushChannel idxCh

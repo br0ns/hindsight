@@ -42,6 +42,7 @@ import System.IO
 
 import qualified Codec.Archive.Tar as Tar
 
+import qualified Data.Set as Set
 import qualified Data.Map as Map
 import Data.Map (Map)
 
@@ -260,19 +261,21 @@ inspect go base name version mbdir = do
                   untar statCh d tarball
                 initDir (pri </> repo) $ \d -> do
                   goCheckout statCh extCh sec repo (Just "root") d
+
+                cache <- newMVar Set.empty
                 let hiP  = localIndex (sec </> "idx") $
                            defaultConfigP { name = "hash index" }
                     kiP         = localIndex (sec </> repo) $
                                   defaultConfigP { name = "key index (" ++ repo ++ ")" }
-                    bsP hCh eCh = BS.blobStore "" maxBlob hCh eCh $
+                    bsP eCh     = BS.blobStore "" maxBlob eCh $
                                   defaultConfigP { name = "blobstore (" ++ repo ++ ")" }
-                    hsP hCh bCh = HS.hashStore statCh hCh bCh $
+                    hsP hCh bCh = HS.hashStore cache statCh hCh bCh $
                                   defaultConfigP { name = "hashstore (" ++ repo ++ ")" }
-                    ksP hCh bCh = KS.keyStore hCh bCh $
+                    ksP hCh bCh = KS.keyStore "" hCh bCh $
                                   defaultConfigP { name = "keystore (" ++ repo ++ ")" }
                 with hiP $ \hiCh ->
                   with kiP $ \kiCh ->
-                  with (ksP kiCh -|- hsP hiCh -|- bsP hiCh extCh) $ \ksCh -> do
+                  with (ksP kiCh -|- hsP hiCh -|- bsP extCh) $ \ksCh -> do
                     let kiP = remoteIndex ksCh (pri </> repo) $
                               defaultConfigP { name = "key index (" ++ repo ++ ")" }
                     with kiP $ \(kiCh :: Channel KIMessage) -> do
@@ -302,24 +305,25 @@ goSnapshot statCh extCh base repo path = do
       hiP  = localIndex idx $
              defaultConfigP { name = "hash index" }
   hiCh <- spawn' hiP
-  hset <- HS.recover irollback statCh hiCh extCh -- Recover from crash if necessary
+  HS.recover irollback statCh hiCh extCh -- Recover from crash if necessary
+
+  cache <- newMVar Set.empty
   let kiP         = localIndex repodir $
                     defaultConfigP { name = "key index (" ++ repo ++ ")" }
-      bsP hCh eCh = BS.blobStore irollback maxBlob hCh eCh $
+      bsP eCh     = BS.blobStore irollback maxBlob eCh $
                     defaultConfigP { name = "blobstore (" ++ repo ++ ")" }
-      hsP hCh bCh = HS.hashStore statCh hCh bCh $
+      hsP hCh bCh = HS.hashStore cache statCh hCh bCh $
                     defaultConfigP { name = "hashstore (" ++ repo ++ ")" }
-      ksP hCh bCh = KS.keyStore hCh bCh $
+      ksP hCh bCh = KS.keyStore rrollback hCh bCh $
                     defaultConfigP { name = "keystore (" ++ repo ++ ")" }
   kiCh <- spawn' kiP
-  KS.recover hset rrollback statCh kiCh hiCh
-  HS.cleanup irollback
+  KS.recover rrollback statCh kiCh hiCh
   -- take "locks"
   mapM_ (createDirectoryIfMissing True)
     [irollback, rrollback]
   -- let's do this
   ksCh <- spawn' $ replicateB 3 -- TODO: paramaterise
-          (ksP kiCh -|- hsP hiCh -|- bsP hiCh extCh)
+          (ksP kiCh -|- hsP hiCh -|- bsP extCh)
   removeMissing kiCh
   send statCh $ Say "  Calculating size"
   totSize <- runResourceT $ traverse statCh path $$ sumFileSize
@@ -330,10 +334,11 @@ goSnapshot statCh extCh base repo path = do
   flushChannel kiCh -- Flush tree to disk
   flushChannel hiCh -- Flush tree to disk
   -- release "locks"
-  mapM_ removeDirectory
+  mapM_ removeDirectoryRecursive
     [irollback, rrollback]
   Ch.sendP wsup Stop
   where
+    epoch = clockTimeToEpoch `fmap` getClockTime
     sendFile ksCh (file, stat) = do
       let modtime = modificationTime stat
       rep <- liftIO newEmptyTMVarIO
@@ -458,14 +463,15 @@ goCheckout' rec (kiCh :: Channel KIMessage) statCh extCh base repo mbterm dest =
       hiP  = localIndex (base </> "idx") $
              defaultConfigP { name = "hash index" }
   hiCh <- spawn' hiP
-  let bsP hCh eCh = BS.blobStore "" maxBlob hCh eCh $
+  cache <- newMVar Set.empty
+  let bsP eCh     = BS.blobStore "" maxBlob eCh $
                     defaultConfigP { name = "blobstore (" ++ repo ++ ")" }
-      hsP hCh bCh = HS.hashStore statCh hCh bCh $
+      hsP hCh bCh = HS.hashStore cache statCh hCh bCh $
                     defaultConfigP { name = "hashstore (" ++ repo ++ ")" }
       -- ksP hCh bCh = KS.keyStore hCh bCh $
       --               defaultConfigP { name = "keystore (" ++ repo ++ ")" }
   hsCh <- spawn' $ replicateB 3 -- TODO: paramaterise
-          (hsP hiCh -|- bsP hiCh extCh)
+          (hsP hiCh -|- bsP extCh)
   restore dest kiCh hsCh
   Ch.sendP wsup Stop
     where

@@ -16,7 +16,9 @@ import Util (byteStringToFileName, safeWriteFileWith)
 import System.Directory
 import System.FilePath
 
-import qualified Process.Index as Idx
+import Process.BlobStoreTypes
+
+import qualified Process.HashStoreTypes as HS
 import qualified Process.External as Ext
 
 import Control.Monad
@@ -36,24 +38,7 @@ import qualified Data.List as L
 
 import Data.Word
 
--- ID
-type Index = Word32
-
-newtype ID  = ID { unID :: (UUID, Index) }
-              deriving (Show, Eq)
-
-instance Ser.Serialize ID where
-  put = Ser.put . unID
-  get = ID `fmap` Ser.get
-
--- Message
-type Value   = ByteString
-type Hash    = Skein256
-data Message
-  = Store !Hash !Value
-  | Retrieve !ID !(Reply Value)
-
-blobStore workdir minBlobSize hiCh extCh =
+blobStore workdir minBlobSize extCh =
   newM (hSup, hMsg, info "Started", hFlush, run)
   where
     run m = do blobId <- uuid
@@ -63,18 +48,13 @@ blobStore workdir minBlobSize hiCh extCh =
       do (blobId, blob') <- get
          let blob = L.reverse blob'
              callback = liftIO $ do
-               mapM_ (\((hash, _), idx) -> do
-                         sendReply hiCh $ Idx.Modify
-                           (\_ Nothing -> Just $! ID (blobId, idx))
-                           hash
-                           (Just $! ID (blobId, idx))
-                     ) $ zip blob [0..]
+               mapM_ (\((hash, _, cb), idx) -> cb $! ID (blobId, idx))
+                     $ zip blob [0..]
                -- This line is expensive, but might be a good idea if the system crashes often...
                -- sendBlock hiCh Idx.Flush
-               unlock
              lockfile = workdir </> byteStringToFileName (encode blobId)
-             lock = liftIO $ safeWriteFileWith id lockfile $ encode $ map fst blob
-             unlock = removeFile lockfile
+             lock = liftIO $ safeWriteFileWith id lockfile $ encode $
+                    map (\(h, _, _) -> h) blob
          length <- size
          info $ "Flushing: " ++ show length
          unless (L.null blob) $ do
@@ -82,7 +62,7 @@ blobStore workdir minBlobSize hiCh extCh =
            send extCh $ Ext.PutCallback
              callback
              (encode blobId)
-             (encode $ map snd blob)
+             (encode $ map (\(_, v, _) -> v) $ blob)
          blobId' <- liftIO uuid
          put (blobId', [])
          info "Done!"
@@ -93,8 +73,8 @@ blobStore workdir minBlobSize hiCh extCh =
     hMsg msg = {-# SCC "blobStore" #-}
       do blobId <- gets fst
          case msg of
-           Store hash v ->
-             do store hash v
+           Store hash v cb ->
+             do store hash v cb
                 -- flush?
                 offset <- fmap fromIntegral size
                 when (fromIntegral offset + B.length v >= minBlobSize)
@@ -103,10 +83,11 @@ blobStore workdir minBlobSize hiCh extCh =
              do blob <- sendReply extCh $ Ext.Get $ encode blobId
                 replyTo rep $! (!! (fromIntegral idx)) $ either error id $ decode blob
       where
-        store hash v = do modify $ \(blobId, blob) -> (blobId, (hash, v) : blob)
+        store hash v cb = do
+          modify $ \(blobId, blob) -> (blobId, (hash, v, cb) : blob)
 
     size    = do (_, blob) <- get
-                 return $ L.foldl' (\l c -> l + (B.length $ snd c)) 0 blob
+                 return $ L.foldl' (\l (_, v, _) -> l + (B.length v)) 0 blob
 
     hFlush = do
       flush

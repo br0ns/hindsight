@@ -5,7 +5,7 @@ module Backup
 
 import Prelude hiding (catch)
 
-import Util (decode')
+import Util (decode', expandUser)
 import Config
 import Supervisor
 import Process
@@ -98,14 +98,10 @@ remoteIndex extCh dir =
 backend statCh base mbbufdir = do
   masterKey <- either error id `fmap` (readMasterKey $ base </> "conf" </> "key")
   mod <- expandUser backendModule
-  let extP = Ext.external statCh masterKey mbbufdir backendModule $
+  let extP = Ext.external statCh masterKey mbbufdir mod $
              defaultConfigP { name = "external",
                               channelSize = 10 }
   return $ replicateB 5 extP -- TODO: parameterise
-
-expandUser "~"         = getHomeDirectory
-expandUser ('~':'/':p) = fmap (++ p) getHomeDirectory
-expandUser p           = return p
 
 stats = return $ Stats.stats 100000 30 defaultConfigP { name = "stats" }
 
@@ -235,6 +231,21 @@ deleteSnapshot base repo version = do
       key = pack repo
 
 
+withCacheDirectory base f = do
+  let cache = base </> "cache"
+  createDirectoryIfMissing True cache
+  forkIO $ cleaner cache
+  f cache
+  where
+    cleaner cache = return ()
+    -- cleaner path = forever $ do threadDelay $ 5 * 10^6
+    --                               all <- getDirectoryContents path
+    --                               `catch` \(e :: IOError) -> return []
+    --                             let fs = filter (not . (extSeparator `elem`)) all
+    --                             mapM_ removeFile (map (path </>) fs)
+    --                               `catch` \(e :: IOError) -> return ()
+
+
 inspect go base name version mbdir = do
   let pri      = base </> "pri"
       sec      = base </> "sec"
@@ -250,11 +261,10 @@ inspect go base name version mbdir = do
           let snap = snaps Map.! version
               snapref = reference snap
               repo = name ++ "~" ++ show (clockTimeToEpoch $ timestamp snap)
-          withTemporaryDirectory "hindsight" $ \tmp -> do
+          withCacheDirectory base $ \tmp -> do
             statP <- stats
             with statP $ \statCh -> do
               extP <- backend statCh base $ Just tmp
-              forkIO $ cleaner tmp
               with extP $ \extCh -> do
                 initDir (sec </> repo) $ \d -> do
                   tarball <- sendReply extCh $ Ext.Get snapref
@@ -281,12 +291,6 @@ inspect go base name version mbdir = do
                     with kiP $ \(kiCh :: Channel KIMessage) -> do
                       go extCh statCh kiCh pri repo mbdir
   where
-    cleaner path = forever $ do threadDelay $ 5 * 10^6
-                                all <- getDirectoryContents path
-                                  `catch` \(e :: IOError) -> return []
-                                let fs = filter (not . (extSeparator `elem`)) all
-                                mapM_ removeFile (map (path </>) fs)
-                                  `catch` \(e :: IOError) -> return ()
     initDir d k = do
       ex <- doesDirectoryExist d
       unless ex $ do

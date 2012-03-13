@@ -8,11 +8,6 @@ hindsightBase = "~/.hindsight"
 backendModule = "~/.hindsight/modules/local"
 
 
--- How often to flush internal state to disk? (seconds)
-flushInterval :: Integer
-flushInterval = 600
-
-
 -- Debugging (default: DebugOff)
 data Debug = DebugOn | DebugOff
            deriving Eq
@@ -28,12 +23,12 @@ chunkMode = Fixed
 -- chunkMode = RSync
 
 
--- Compressions of blobs (default: Snappy)
+-- Compressions of blobs (default: GZip)
 -- (This will not affect internal compression of tree nodes)
-data CompressionMode = CompressionOff | Snappy
+data CompressionMode = CompressionOff | GZip
                      deriving Eq
 
-compressionMode = Snappy
+compressionMode = GZip
 
 -- Interval between flushes of the system.  Work done in the interval might need
 -- to be redone in the event of a crash.  In seconds.

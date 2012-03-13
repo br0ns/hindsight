@@ -26,3 +26,7 @@ data CompressionMode = CompressionOff | Snappy
                      deriving Eq
 
 compressionMode = Snappy
+
+-- Interval between flushes of the system.  Work done in the interval might need
+-- to be redone in the event of a crash.  In seconds.
+flushInterval = 300

@@ -5,7 +5,7 @@ module Backup
 
 import Prelude hiding (catch)
 
-import Util (decode')
+import Util (decode', expandUser)
 import Config
 import Supervisor
 import Process
@@ -98,14 +98,10 @@ remoteIndex extCh dir =
 backend statCh base mbbufdir = do
   masterKey <- either error id `fmap` (readMasterKey $ base </> "conf" </> "key")
   mod <- expandUser backendModule
-  let extP = Ext.external statCh masterKey mbbufdir backendModule $
+  let extP = Ext.external statCh masterKey mbbufdir mod $
              defaultConfigP { name = "external",
                               channelSize = 10 }
   return $ replicateB 5 extP -- TODO: parameterise
-
-expandUser "~"         = getHomeDirectory
-expandUser ('~':'/':p) = fmap (++ p) getHomeDirectory
-expandUser p           = return p
 
 stats = return $ Stats.stats 100000 30 defaultConfigP { name = "stats" }
 

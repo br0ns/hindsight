@@ -1,5 +1,7 @@
 module Config where
 
+-- The directory to use for internal storage
+hindsightBase = "~/.hindsight"
 
 -- The module to use for external storage
 -- See example modules in the "modules/" directory

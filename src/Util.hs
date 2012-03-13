@@ -14,6 +14,7 @@ module Util
        , safeKill
        , decode'
        , epoch
+       , expandUser
        )
        where
 
@@ -102,3 +103,7 @@ safeKill m = do
 
 decode' errmsg a =
   either (\msg -> error $ errmsg ++ ": " ++ msg) id $ decode a
+
+expandUser "~"                = getHomeDirectory
+expandUser ('~': p @ ('/':_)) = fmap (++ p) getHomeDirectory
+expandUser p                  = return p

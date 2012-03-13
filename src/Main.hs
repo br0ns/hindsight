@@ -34,7 +34,8 @@ usage = do
     [ "Usage: " ++ name ++ " <command>"
     , "  Commands:"
     , "    init"
-    , "      Initialise the system. Generates as new key file ind `~/.hindsight'."
+    , "      Initialise the system. Generates a new key file in <hindsightBase>."
+    , "      <hindsightBase> can be configured in `Config.hs'."
     , ""
     , "    snapshot <name> <path>"
     , "      Take a new snapshot of <path> and save it under the name <name>."
@@ -105,7 +106,7 @@ go = do
   case args of
     cmd : args -> do
       home <- getHomeDirectory
-      let base = home </> ".hindsight"
+      base <- expandUser hindsightBase
       createDirectoryIfMissing True base
       case cmd of
         "init"     -> Backup.init base

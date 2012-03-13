@@ -7,6 +7,7 @@ module Util
        , atomicFileWrite
        , safeWriteFileWith
        , safeReadFileWith
+       , safeAppendFile
        , seal
        , unseal
        , unseal'
@@ -32,8 +33,11 @@ import Data.UUID
 import System.FilePath ((<.>))
 import System.Directory (renameFile)
 
-import System.Time       (getClockTime)
-import System.Time.Utils (clockTimeToEpoch)
+import System.IO          (withFile, openFile, hClose, IOMode(..))
+import System.Time        (getClockTime)
+import System.Time.Utils  (clockTimeToEpoch)
+import System.Posix.IO    (handleToFd)
+import System.Posix.Fsync (fsync, sync, syncFile)
 
 import Control.Concurrent
 import Control.Exception
@@ -67,12 +71,20 @@ atomicFileWrite path bytes = do
     writeThenMove tmp = do
       B.writeFile tmp bytes
       renameFile tmp path
+      syncFile path
 
     write tmp = do
-      writeThenMove tmp `finally` (removeFile tmp `catch` \(_::IOError) -> return ())
+      writeThenMove tmp `finally`
+        (removeFile tmp `catch` \(_::IOError) -> return ())
 
 safeWriteFileWith f path bytes = atomicFileWrite path $ f $ seal bytes
 safeReadFileWith  f path       = unseal' `fmap` f `fmap` B.readFile path
+
+
+safeAppendFile path bs = do
+  withFile path AppendMode $ \h -> do
+    B.hPut h bs
+    sync h
 
 
 seal :: B.ByteString -> B.ByteString

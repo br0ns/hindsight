@@ -63,13 +63,13 @@ recover rollback statCh idxCh extCh = do
           forM_ files $ \file -> do
             let path = rollback </> file
             hashes  <- decode' "HashStore.recover" `fmap` safeReadFileWith id path
-            alive <- foldM removeUnknown False hashes
+            alive <- foldM isKnown False hashes
             unless alive $ do
               send extCh $ Ext.Del $ B.pack file
             removeFile $ rollback </> file
       where
-        removeUnknown alive hash | alive     = return alive
-                                 | otherwise = do
+        isKnown alive hash | alive     = return alive
+                           | otherwise = do
           send statCh $ Stats.SetMessage $ show hash
           ex <- sendReply idxCh $ Idx.Lookup hash
           return $ isJust ex

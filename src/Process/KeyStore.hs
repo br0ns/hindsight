@@ -21,25 +21,30 @@ import System.IO hiding (hFlush)
 import System.Directory
 import System.Posix.Files (getFileStatus)
 
-import Control.Monad.Trans
-import Control.Monad.Trans.Resource hiding (try)
-import Control.Monad
+import GHC.Conc
 import Control.Monad.State.Strict
 
 import System.FilePath
-import Data.UUID
-import Data.Maybe
+import System.Posix.Fsync (sync)
+
+import Data.Char
+import Data.Maybe (fromMaybe)
 import qualified Data.Set as Set
 
-import Config (chunkMode, ChunkMode(..))
+import Config (chunkMode, ChunkMode(..), flushInterval)
+
+import Supervisor (SupMessage(..))
 import Process
-import Rollsum
-import Supervisor
+import Rollsum (makeSum, feedSum, resetSum, splitBlock)
+
+import Data.Serialize (encode, decode)
+
 
 import qualified Process.Stats as Stats
 
 import qualified Data.ByteString.Lazy as BL
 
+import Data.Word
 import Data.List
 import Data.Conduit hiding (Stop)
 import qualified Data.Conduit.List as CL
@@ -48,8 +53,6 @@ import qualified Data.Conduit.Binary as CB
 import Util
 import qualified Process.Index as Idx
 import qualified Process.HashStore as HS
-
-import Config (flushInterval)
 
 type Meta = ByteString
 type Key = ByteString
@@ -71,16 +74,23 @@ recover rollback statCh kidxCh hidxCh = do
   ex <- doesDirectoryExist rollback
   when ex $ do
     send statCh $ Stats.Say "  Checking index consistency"
-    allfiles <- (\\ [".", ".."]) `fmap` getDirectoryContents rollback
-    forM_ (filter (not . ('.' `elem`)) allfiles) $ \file -> do
-      key <- safeReadFileWith id $ rollback </> file
-      mh <- sendReply kidxCh $ Idx.Lookup key
-      case mh of
-        Nothing -> return ()
-        Just hs -> send kidxCh $ Idx.Delete key
-    flushChannel kidxCh
-    forM_ allfiles $ \file -> do
+    files <- (\\ [".", ".."]) `fmap` getDirectoryContents rollback
+    forM_ files $ \file -> do
+      keys <- decodeAll `fmap` B.readFile (rollback </> file)
+      forM_ keys $ \key -> do
+        mh <- sendReply kidxCh $ Idx.Lookup key
+        case mh of
+          Nothing -> return ()
+          Just hs -> send kidxCh $ Idx.Delete key
+      flushChannel kidxCh
       removeFile file `catch` \(e :: SomeException) -> return ()
+
+  where
+    decodeAll bss | B.null bss = []
+                  | otherwise  = do
+      let len = either error id $ decode bss :: Word64
+          bs  = either error id $ decode bss :: B.ByteString
+      bs : decodeAll (B.drop (fromIntegral len + 8) bss)
 
 
 keyStore workdir idxCh hsCh = newM (handleSup, handleMsg,
@@ -109,13 +119,14 @@ keyStore workdir idxCh hsCh = newM (handleSup, handleMsg,
           go = do
             -- check if we should flush
             lastFlush <- get
-            now       <- liftIO $ epoch
+            now       <- liftIO epoch
             when (now - lastFlush > flushInterval) $ do
               hFlush
               put now
             -- create log
-            uid <- liftIO uuid
-            liftIO $ safeWriteFileWith id (workdir </> show uid) key
+            wd <- liftIO workfile
+            liftIO $ safeAppendFile wd $ encode key
+
             let msource =
                   case content of
                     None      -> Nothing
@@ -139,10 +150,10 @@ keyStore workdir idxCh hsCh = newM (handleSup, handleMsg,
               Nothing -> return $ Right []
             case mids of
               Left e -> do
-                warning $ concat $ ["Could not insert key: ", show key, "\n", show e]
+                warning $ concat ["Could not insert key: ", show key, "\n", show e]
                 replyTo rep $ Left $ show e
               Right ids -> do
-                meta <- liftIO $ mmeta
+                meta <- liftIO mmeta
                 metaid <- sendReply hsCh $ HS.Insert meta
                 send idxCh $ Idx.Insert key (mbvs, metaid, ids)
                 replyTo rep $ Right True
@@ -152,8 +163,11 @@ keyStore workdir idxCh hsCh = newM (handleSup, handleMsg,
       case mb of
         Nothing -> replyTo rep Nothing
         Just (_, metaid, ids) -> do
-          chunks <- mapM (sendReply hsCh . HS.Lookup) $ ids
+          chunks <- mapM (sendReply hsCh . HS.Lookup) ids
           replyTo rep $ B.concat `fmap` sequence chunks
+
+    workfile = (workdir</>) `fmap` ((filter isDigit . show) `fmap` myThreadId)
+
 
     run m = do
       now <- epoch
@@ -165,11 +179,7 @@ keyStore workdir idxCh hsCh = newM (handleSup, handleMsg,
       -- flush key index
       flushChannel idxCh
       -- then remove waiting paths
-      ef <- liftIO $ try $ getDirectoryContents workdir
-      case ef of
-        Left (e :: SomeException) -> return ()
-        Right files ->
-          liftIO $ mapM_ removeFile $ map (workdir </>) $ files \\ [".", ".."]
+
 
 maxChunkSize :: Int
 maxChunkSize = 2^16
@@ -227,7 +237,7 @@ rsyncChunker =
   }
   where
     push feed reset split state input = do
-      res <- state `seq` (lift $ push0 feed reset split state input)
+      res <- state `seq` lift (push0 feed reset split state input)
       return $ case res of
         StateFinished a b -> Finished a b
         StateProducing state' output ->

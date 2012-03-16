@@ -59,9 +59,10 @@ import Data.UUID
 
 import Data.Conduit hiding (Stop)
 import qualified Data.Conduit.List as CL
+import qualified Data.Conduit.Extra as CE
 
 import Data.Function
-import Data.List
+import Data.List hiding (group)
 import Data.Maybe
 import Data.Ord
 
@@ -333,7 +334,7 @@ goSnapshot statCh extCh base repo path = do
   totSize <- runResourceT $ traverse statCh path $$ sumFileSize
   send statCh $ Say "  Transferring"
   send statCh $ SetGoal $ fromIntegral totSize
-  runResourceT $ traverse statCh path $$ CL.mapM_ (sendFile ksCh)
+  runResourceT $ traverse statCh path $= CE.group 32 $$ CL.mapM_ (sendFiles ksCh)
   flushChannel ksCh -- Flush stuff to the trees and the interwebz
   flushChannel kiCh -- Flush tree to disk
   flushChannel hiCh -- Flush tree to disk
@@ -343,6 +344,7 @@ goSnapshot statCh extCh base repo path = do
   Ch.sendP wsup Stop
   where
     epoch = clockTimeToEpoch `fmap` getClockTime
+    sendFiles ksCh = mapM_ $ sendFile ksCh
     sendFile ksCh (file, stat) = do
       let modtime = modificationTime stat
       rep <- liftIO newEmptyTMVarIO

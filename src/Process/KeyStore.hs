@@ -123,9 +123,6 @@ keyStore workdir idxCh hsCh = newM (handleSup, handleMsg,
             when (now - lastFlush > flushInterval) $ do
               hFlush
               put now
-            -- create log
-            wd <- liftIO workfile
-            liftIO $ safeAppendFile wd $ encode key
 
             let msource =
                   case content of
@@ -155,6 +152,10 @@ keyStore workdir idxCh hsCh = newM (handleSup, handleMsg,
               Right ids -> do
                 meta <- liftIO mmeta
                 metaid <- sendReply hsCh $ HS.Insert meta
+                -- create log
+                wd <- liftIO workfile
+                liftIO $ safeAppendFile wd $ encode key
+                -- insert key
                 send idxCh $ Idx.Insert key (mbvs, metaid, ids)
                 replyTo rep $ Right True
 
@@ -179,6 +180,7 @@ keyStore workdir idxCh hsCh = newM (handleSup, handleMsg,
       -- flush key index
       flushChannel idxCh
       -- then remove waiting paths
+      liftIO $ removeFile =<< workfile
 
 
 maxChunkSize :: Int

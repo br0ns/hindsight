@@ -5,7 +5,7 @@ module Backup
 
 import Prelude hiding (catch)
 
-import Util (decode', expandUser)
+import Util (decode', expandUser, safeWriteFileWith)
 import Config
 import Supervisor
 import Process
@@ -334,7 +334,8 @@ goSnapshot statCh extCh base repo path = do
   totSize <- runResourceT $ traverse statCh path $$ sumFileSize
   send statCh $ Say "  Transferring"
   send statCh $ SetGoal $ fromIntegral totSize
-  runResourceT $ traverse statCh path $= CE.group 32 $$ CL.mapM_ (sendFiles ksCh)
+  runResourceT $ traverse statCh path $= CE.group 128 $$
+    CL.mapM_ (sendFiles rrollback ksCh)
   flushChannel ksCh -- Flush stuff to the trees and the interwebz
   flushChannel kiCh -- Flush tree to disk
   flushChannel hiCh -- Flush tree to disk
@@ -344,7 +345,10 @@ goSnapshot statCh extCh base repo path = do
   Ch.sendP wsup Stop
   where
     epoch = clockTimeToEpoch `fmap` getClockTime
-    sendFiles ksCh = mapM_ $ sendFile ksCh
+    sendFiles dir ksCh lst = do
+      uid <- show `fmap` uuid
+      safeWriteFileWith id (dir </> uid) $ encode $ map fst lst
+      mapM_ (sendFile ksCh) lst
     sendFile ksCh (file, stat) = do
       let modtime = modificationTime stat
       rep <- liftIO newEmptyTMVarIO

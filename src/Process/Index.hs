@@ -125,9 +125,9 @@ index dir runBackend = newM (hSup, hMsg, init, hFlush, run)
       lock <- newMVar ()
       -- start background processes
       mv0 <- T.rebalanceProcess p -- TODO: rebalance needs a lock?
-      mv1 <- safeForkIO $ \mv -> forever $ do threadDelay $ 2 * 10^6
+      mv1 <- safeForkIO $ \mv -> forever $ do threadDelay $ 10 * 10^6
                                               withMVar mv $ const $ saveIO p lock
-      mv2 <- safeForkIO $ \mv -> forever $ do threadDelay $ 2 * 10^6
+      mv2 <- safeForkIO $ \mv -> forever $ do threadDelay $ 10 * 10^6
                                               withMVar mv $ const $ Cache.flush c
 
       -- run!

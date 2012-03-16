@@ -125,5 +125,3 @@ hashStore mc statCh idxCh bsCh = new (hSup, hMsg, info "Started", hFlush)
     hFlush = do
       -- flush blob store
       flushChannel bsCh
-      -- flush index
-      flushChannel idxCh

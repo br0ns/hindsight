@@ -44,6 +44,7 @@ import qualified Process.Stats as Stats
 
 import qualified Data.ByteString.Lazy as BL
 
+import Data.Maybe (isNothing)
 import Data.Word
 import Data.List
 import Data.Conduit hiding (Stop)
@@ -74,23 +75,26 @@ recover rollback statCh kidxCh hidxCh = do
   ex <- doesDirectoryExist rollback
   when ex $ do
     send statCh $ Stats.Say "  Checking index consistency"
-    files <- (\\ [".", ".."]) `fmap` getDirectoryContents rollback
+    files <- filter (not . (elem '.')) `fmap` getDirectoryContents rollback
     forM_ files $ \file -> do
-      keys <- decodeAll `fmap` B.readFile (rollback </> file)
+      let path = rollback </> file
+      keys <- decode' "KeyStore: recover" `fmap`
+              safeReadFileWith id path
       forM_ keys $ \key -> do
-        mh <- sendReply kidxCh $ Idx.Lookup key
-        case mh of
+        send statCh $ Stats.SetMessage $ show key
+        mk <- sendReply kidxCh $ Idx.Lookup key
+        case mk of
           Nothing -> return ()
-          Just hs -> send kidxCh $ Idx.Delete key
+          Just (_, meta, hs) -> do
+            ls <- mapM findHash $ meta:hs
+            -- TODO: update reference sets
+            when (any isNothing ls) $ do
+              send kidxCh $ Idx.Delete key
       flushChannel kidxCh
-      removeFile file `catch` \(e :: SomeException) -> return ()
+      removeFile path `catch` \(e :: SomeException) -> return ()
 
   where
-    decodeAll bss | B.null bss = []
-                  | otherwise  = do
-      let len = either error id $ decode bss :: Word64
-          bs  = either error id $ decode bss :: B.ByteString
-      bs : decodeAll (B.drop (fromIntegral len + 8) bss)
+    findHash hash = sendReply hidxCh $ Idx.Lookup hash
 
 
 keyStore workdir idxCh hsCh = newM (handleSup, handleMsg,

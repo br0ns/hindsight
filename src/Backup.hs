@@ -5,7 +5,7 @@ module Backup
 
 import Prelude hiding (catch)
 
-import Util (decode', expandUser, safeWriteFileWith)
+import Util (epoch, decode', expandUser, safeWriteFileWith)
 import Config
 import Supervisor
 import Process
@@ -31,7 +31,7 @@ import System.Directory
 import System.Posix.Files
 import System.Unix.Directory (withTemporaryDirectory)
 import System.Time
-import System.Time.Utils
+import System.Time.Utils (clockTimeToEpoch)
 import System.Posix.Directory hiding (removeDirectory)
 import qualified Stat as S
 
@@ -334,28 +334,52 @@ goSnapshot statCh extCh base repo path = do
   totSize <- runResourceT $ traverse statCh path $$ sumFileSize
   send statCh $ Say "  Transferring"
   send statCh $ SetGoal $ fromIntegral totSize
-  runResourceT $ traverse statCh path $= CE.group 128 $$
+  -- start cleaner
+  pid <- forkIO $ rollbackCleaner rrollback ksCh kiCh hiCh
+  -- insert keys!
+  runResourceT $ traverse statCh path $= CE.group 1024 $$
     CL.mapM_ (sendFiles rrollback ksCh)
-  flushChannel ksCh -- Flush stuff to the trees and the interwebz
-  flushChannel kiCh -- Flush tree to disk
-  flushChannel hiCh -- Flush tree to disk
+  -- stop cleaner
+  killThread pid
+  flush ksCh kiCh hiCh
   -- release "locks"
   mapM_ removeDirectoryRecursive
     [irollback, rrollback]
   Ch.sendP wsup Stop
   where
-    epoch = clockTimeToEpoch `fmap` getClockTime
+    flush ksCh kiCh hiCh = do
+        flushChannel ksCh -- Flush from chain to trees and externally
+        flushChannel kiCh -- Flush key tree to disk
+        flushChannel hiCh -- Flush hash tree to disk
+
+    rollbackCleaner dir ksCh kiCh hiCh = forever $ do
+                                         threadDelay $ (10^6) * flushInterval
+                                         go
+      where
+        go = do
+          now <- epoch
+          flush ksCh kiCh hiCh
+          files <- filter (not . (elem '.')) `fmap` getDirectoryContents dir
+          forM_ files $ \file -> do
+            let path = dir </> file
+            mt <- modificationTime `fmap` getFileStatus path
+            when (fromEnum mt < fromIntegral now) $ do
+              removeFile path
+
+    toKey = pack . makeRelative path
+
     sendFiles dir ksCh lst = do
       uid <- show `fmap` uuid
-      safeWriteFileWith id (dir </> uid) $ encode $ map fst lst
+      safeWriteFileWith id (dir </> uid) $ encode $ map (toKey.fst) lst
       mapM_ (sendFile ksCh) lst
+
     sendFile ksCh (file, stat) = do
       let modtime = modificationTime stat
       rep <- liftIO newEmptyTMVarIO
       liftIO $ send ksCh $
         KS.Insert
         (Just $ encode $ fromEnum modtime)
-        (pack $ makeRelative path file)
+        (toKey file)
         (encode `fmap` S.readPosixFile (Just stat) file)
         (if isRegularFile stat then KS.File file
          else KS.None)

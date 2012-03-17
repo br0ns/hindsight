@@ -57,7 +57,7 @@ recover rollback statCh idxCh extCh = do
       Right True  -> do
         allfiles <- getDirectoryContents rollback
         -- Skip ".", ".." and tmp files "foo.bar"
-        let files = filter (not . ('.' `elem`)) allfiles
+        let files = filter (not . (elem '.')) allfiles
         unless (null files) $ do
           send statCh $ Stats.Say "  Rolling back dangling hashes"
           forM_ files $ \file -> do

@@ -77,7 +77,9 @@ atomicFileWrite path bytes = do
       writeThenMove tmp `finally`
         (removeFile tmp `catch` \(_::IOError) -> return ())
 
-safeWriteFileWith f path bytes = atomicFileWrite path $ f $ seal bytes
+safeWriteFileWith f path bytes = (atomicFileWrite path $ f $ seal bytes)
+  `catch` \(e :: SomeException) -> safeWriteFileWith f path bytes
+
 safeReadFileWith  f path       = unseal' `fmap` f `fmap` B.readFile path
 
 

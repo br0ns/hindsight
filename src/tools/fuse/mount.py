@@ -67,9 +67,7 @@ class HelloFS(Fuse):
             st.st_nlink = 2
         elif os.path.exists(cache(path)):
             return MyStat.fromStat(os.stat(cache(path)))
-        else:
-            return -errno.ENOENT
-        return st
+        return -errno.ENOENT
 
     def readdir(self, path, offset):
         LOG.debug("readdir: " + path)

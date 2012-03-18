@@ -21,7 +21,7 @@ LOG = logging.getLogger()
 
 global SNAPSHOT
 global CACHE_DIR
-
+DATA_TAG = ".hindsight-data-tag"
 
 if not hasattr(fuse, '__version__'):
     raise RuntimeError, \
@@ -29,10 +29,12 @@ if not hasattr(fuse, '__version__'):
 
 fuse.fuse_python_api = (0, 2)
 
-def download(path):
-    cmd = "hindsight checkout %s:%s %s" % (SNAPSHOT, path.strip("/"), cache(""))
+def download(path, data=True):
+    cmd = "hindsight checkout %s %s:%s %s" % (not data and "--nodata" or "",
+                                              SNAPSHOT, path.strip("/"), cache(""))
     LOG.debug(cmd)
     os.system(cmd)
+
 
 def cache(path):
     return CACHE_DIR + path
@@ -65,6 +67,7 @@ class HelloFS(Fuse):
         if path == '/':
             st.st_mode = stat.S_IFDIR | 0755
             st.st_nlink = 2
+            return st
         elif os.path.exists(cache(path)):
             return MyStat.fromStat(os.stat(cache(path)))
         return -errno.ENOENT
@@ -74,10 +77,12 @@ class HelloFS(Fuse):
         lst = os.listdir(cache(path))
         LOG.debug(lst)
         if not lst:
-            download(path)
+            download(path, data=False)
             lst = os.listdir(cache(path))
 
         for r in  (['.', '..'] + lst):
+            if r.endswith(DATA_TAG):
+                continue
             yield fuse.Direntry(r)
 
     def open(self, path, flags):
@@ -88,7 +93,12 @@ class HelloFS(Fuse):
 
     def read(self, path, size, offset):
         LOG.debug("read: " + path)
-        f = file(cache(path))
+        c = cache(path)
+        dt = c + DATA_TAG
+        if not os.path.exists(dt):
+            download(path, data=True)
+            file(dt, 'w').close()
+        f = file(c)
         f.seek(offset)
         return f.read(size)
 
@@ -111,6 +121,11 @@ Userspace hello example
     server.main()
 
 if __name__ == '__main__':
+    if len(sys.argv) != 3:
+        print "usage:"
+        print "%s snapshot~n mount-point" % sys.argv[0]
+        exit(0)
+
     SNAPSHOT = sys.argv[1]
     mount = sys.argv[2]
 

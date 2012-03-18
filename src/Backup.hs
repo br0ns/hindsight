@@ -214,9 +214,9 @@ untar statCh path tarball = do
 list rec = inspect $ const $ goList rec
 listdir = inspect $ const goListDir
 search = inspect $ const goSearch
-checkout rec base name version mbdir dest =
+checkout rec noData base name version mbdir dest =
   inspect (\e s k base repo mbdir ->
-            goCheckout' rec k s e base repo mbdir dest) base name version mbdir
+            goCheckout' rec noData k s e base repo mbdir dest) base name version mbdir
 
 deleteSnapshot base repo version = do
   with (snapP base) $ \snapCh -> do
@@ -471,27 +471,21 @@ goInspect recursive go mbterm kiCh = do
         search =
           if recursive
           then searchRec
-          else searchNoRec
+          else listDirSearch x
         searchRec (min, max) =
           min <= key' && key' <= max ||
           key' `B.isPrefixOf` min
-        searchNoRec (min, max) =
-          searchRec (min, max) &&
-          (B.all ('/' /=) (B.drop (B.length key') min) || dir min /= dir max)
-        dir = B.takeWhile (/= '/') . B.drop (B.length key')
         key = pack x
-        key' = if x == ""
-               then key
-               else pack $ x ++ "/"
+        key' = if null x then B.empty else pack (x ++ "/")
     Nothing -> do
       kvs <- sendReply kiCh $ Idx.ToList
       mapM_ go kvs
 
 goCheckout statCh extCh base repo mbdir dest =
   with (localIndex (base </> repo) defaultConfigP { name = "hash index" }) $ \kiCh ->
-  goCheckout' True kiCh statCh extCh base repo mbdir dest
+  goCheckout' True False kiCh statCh extCh base repo mbdir dest
 
-goCheckout' rec (kiCh :: Channel KIMessage) statCh extCh base repo mbterm dest = do
+goCheckout' rec noData (kiCh :: Channel KIMessage) statCh extCh base repo mbterm dest = do
   (wsup, rsup) <- Ch.newUnboundedChannelP
   let spawn' = spawn $ Just rsup
       hiP  = localIndex (base </> "idx") $
@@ -534,10 +528,14 @@ goCheckout' rec (kiCh :: Channel KIMessage) statCh extCh base repo mbterm dest =
               case S.fileType stat of
                 S.File -> do
                   h <- openFile path WriteMode
-                  forM_ hashes $ \hash -> do
-                    Just chunk <- sendReply hsCh $ HS.Lookup hash
-                    B.hPut h chunk
+                  unless noData $ do
+                    forM_ hashes $ \hash -> do
+                      Just chunk <- sendReply hsCh $ HS.Lookup hash
+                      B.hPut h chunk
                   hClose h
+                  when noData $ do
+                    setFileSize path $ fileSize $
+                      S.getFileStatus $ S.fileStatus stat
                   -- restore timestamps
                   S.updatePosixFile stat path
                 _ -> S.createPosixFile stat path
@@ -561,20 +559,26 @@ goList rec statCh kiCh base repo mbterm = do
     putStrLn $ B.unpack file
 
 goListDir statCh kiCh base repo term = do
-  kvs <- sendReply kiCh $ Idx.Search search
+  kvs <- sendReply kiCh $ Idx.Search $ listDirSearch term
   sendBlock statCh Quiet
   forM_ (sort $ map fst kvs) $ \file ->
     putStrLn $ B.unpack file
+
+
+listDirSearch term = search
   where
-    search (min, max) =
-      (min <= key' && key' <= max ||
-       key' `B.isPrefixOf` min) &&
-      (B.all ('/' /=) (B.drop (B.length key') min) || dir min /= dir max)
-    dir = B.takeWhile (/= '/') . B.drop (B.length key')
-    key = pack term
-    key' = if term == ""
-           then key
-           else pack $ term ++ "/"
+    search (min, max)
+      | min == max = hasPrefix min && B.notElem '/' (stripPrefix min)
+      | min <= key && key <= max = True
+      | hasPrefix min = not (hasPrefix max && dir min == dir max)
+      | min > key = False
+      | max < key = False
+      | otherwise = error $ "min: " ++ show min ++ ", max: " ++ show max
+
+    stripPrefix = B.drop (B.length key)
+    hasPrefix   = B.isPrefixOf key
+    dir = B.takeWhile (/= '/') . stripPrefix
+    key = if null term then B.empty else pack $ term ++ "/"
 
 goSearch statCh kiCh base repo term = do
   kvs <- sendReply kiCh $ Idx.Search $ \(min, max) ->

@@ -99,6 +99,8 @@ location x =
       toMaybe "" = Nothing
       toMaybe x = Just $ tail x
 
+getFlag f ls = (f `elem` ls, delete f ls)
+
 go = do
   when (debugMode == DebugOn) $
     L.setupLogger L.DEBUG
@@ -115,16 +117,14 @@ go = do
             [repo, path] -> snapshot base repo path
             _ -> usage
         "checkout" ->
-          case args' of
-            [src, dst] -> checkout rec base repo version dir dst
+          case args'' of
+            [src, dst] -> checkout rec noData base repo version dir dst
               where
                 (repo, version, dir) = location src
             _ -> usage
           where
-            (rec, args') =
-              if "-r" `elem` args
-              then (True, delete "-r" args)
-              else (False, args)
+            (rec, args') = getFlag "-r" args
+            (noData, args'') = getFlag "--nodata" args
         "seal" ->
           seal base
         "recover" ->
@@ -156,7 +156,7 @@ go = do
               writeFile hac id
             ["x", hac, path] -> do
               id <- readFile hac
-              checkout True base id 1 Nothing path
+              checkout True False base id 1 Nothing path
         _ -> putStrLn $ "Unknown command: " ++ cmd
     [] -> usage
 

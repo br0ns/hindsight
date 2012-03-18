@@ -59,7 +59,7 @@ class MyStat(fuse.Stat):
                       st.st_size, st.st_atime, st.st_mtime, st.st_ctime)
 
 
-class HelloFS(Fuse):
+class HindsightFS(Fuse):
 
     def getattr(self, path):
         LOG.debug("getattr: " + path)
@@ -112,7 +112,7 @@ def main():
 Userspace hello example
 
 """ + Fuse.fusage
-    server = HelloFS(version="%prog " + fuse.__version__,
+    server = HindsightFS(version="%prog " + fuse.__version__,
                      usage=usage,
                      dash_s_do='setsingle')
 

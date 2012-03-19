@@ -1,22 +1,25 @@
 * Final
-** fix default version to latest (vs earliest)
-** set umask to 600 (400 for master key)
-** chunk list => chunk refs (files)
-** tree node encoding, hash + blobid encoding
-** ref sets
-** don't delete from ~head
-** garbage collect indices on seal
-** Format versioning and checksumming
-** Checkout permissions without permissions
-** How come bup's file can fuck up our sys?
+** TODO fix default version to latest (vs earliest)
+** TODO set umask to 600 (400 for master key)
+** TODO Merkle trees
+** TODO tree node encoding, hash + blobid encoding
+** TODO ref sets
+** TODO don't delete from ~head
+** TODO garbage collect indices on seal
+** TODO Format versioning and checksumming
+** TODO Checkout permissions without permissions
+** TODO How come bup's file can fuck up our sys?
+** TODO Inline metadata in key index
 
 * Other
-** consider specialising the btree with bytestring as key
-** variable chunk size (large files)
-** gzip?
-** investigate hash-tree (refset buffer)
-** persistent cache (not in tmp)
-** fuse read 
-
-** Backup meta data in more natural order
-** Checkout arrow is reversed
+** TODO consider specialising the btree with bytestring as key
+** TODO variable chunk size (large files)
+** TODO gzip?
+** TODO Blindsight
+** DONE persistent cache (not in tmp)
+   CLOSED: [2012-03-19 Mon 10:03]
+** TODO Cache cleaner
+** DONE fuse read
+   CLOSED: [2012-03-19 Mon 10:02]
+** TODO Backup meta data in more natural order
+** TODO Checkout arrow is reversed

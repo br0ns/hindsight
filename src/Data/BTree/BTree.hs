@@ -585,7 +585,7 @@ foldli f a = do p <- ask
     go p a r = do
       n <- liftIO $ C.eval (state p) $ fetch' r
       case n of
-        Leaf   ks    -> return $ M.foldlWithKey f a ks
+        Leaf   ks    -> return $! M.foldlWithKey f a ks
         Branch ks rs -> foldM (go p) a rs
 
 
@@ -599,7 +599,7 @@ foldri f a = do p <- ask
     go p a r = do
       n <- liftIO $ C.eval (state p) $ fetch' r
       case n of
-        Leaf ks      -> return $ M.foldrWithKey f a ks
+        Leaf ks      -> return $! M.foldrWithKey f a ks
         Branch ks rs -> foldM (go p) a $ reverse rs
 
 
@@ -624,7 +624,7 @@ search f = do p  <- ask
     go p r lb ub  = do
       n <- liftIO $ C.eval (state p) $ fetch' r
       case n of
-        Leaf   ks -> return $ filter (\(k, _) -> f (k, k)) $ M.toList ks
+        Leaf   ks -> return $! filter (\(k, _) -> f (k, k)) $ M.toList ks
         Branch ks rs -> do
           let ints = findInts 0 (lb:ks ++ [ub])
           ls <- mapM (\(n, lb, ub) -> go p (rs!!n) lb ub) ints

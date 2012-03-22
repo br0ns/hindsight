@@ -97,9 +97,8 @@ recover rollback statCh kidxCh hidxCh = do
     findHash hash = sendReply hidxCh $ Idx.Lookup hash
 
 
-keyStore workdir idxCh hsCh = newM (handleSup, handleMsg,
-                                    info "Started", hFlush,
-                                    run)
+keyStore workdir idxCh hsCh = new (handleSup, handleMsg,
+                                   info "Started", hFlush)
   where
     handleSup msg =
       case msg of
@@ -160,10 +159,6 @@ keyStore workdir idxCh hsCh = newM (handleSup, handleMsg,
         Just (_, metaid, ids) -> do
           chunks <- mapM (sendReply hsCh . HS.Lookup) ids
           replyTo rep $ B.concat `fmap` sequence chunks
-
-    run m = do
-      now <- epoch
-      evalStateT m now
 
     hFlush = do
       -- flush hash store

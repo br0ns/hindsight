@@ -360,7 +360,7 @@ goSnapshot statCh extCh base repo path = do
         flushChannel hiCh -- Flush hash tree to disk
 
     rollbackCleaner dir ksCh kiCh hiCh = forever $ do
-                                         threadDelay $ (10^6) * flushInterval
+                                         threadDelay $ fromIntegral $ (10^6) * flushInterval
                                          go
       where
         go = do

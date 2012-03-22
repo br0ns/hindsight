@@ -1,10 +1,9 @@
 #!/usr/bin/env python
 
-#    Copyright (C) 2006  Andrew Straw  <strawman@astraw.com>
-#
-#    This program can be distributed under the terms of the GNU LGPL.
-#    See the file COPYING.
-#
+
+#    Based on code by: Andrew Straw  <strawman@astraw.com>
+#    http://stuff.mit.edu/iap/2009/fuse/examples/hello.py
+
 
 import logging
 import sys, os, stat, errno
@@ -127,10 +126,9 @@ if __name__ == '__main__':
         exit(0)
 
     SNAPSHOT = sys.argv[1]
-    mount = sys.argv[2]
+    mount = os.path.realpath(sys.argv[2])
 
-    dir = os.path.dirname(os.getcwd() + "/" + sys.argv[0])
-    CACHE_DIR = dir + "/" + mount + ".hindsight-cache"
+    CACHE_DIR = sys.path[0] + "/" + SNAPSHOT.rsplit("~", 1)[0] + ".cache"
 
     if not (os.path.exists(mount)):
         os.mkdir(mount)

@@ -546,7 +546,7 @@ toList = do p <- ask
       n <- liftIO $ C.eval (state p) $ Cstm.fetchGen gen r
       case n of
         Nothing             -> error $ "toList: invalid tree: " ++ show r
-        Just (Leaf ks)      -> return $ M.toList ks
+        Just (Leaf ks)      -> return $! M.toList ks
         Just (Branch ks rs) -> do
           ls <- mapM (go gen p) rs
           return $ concat ls

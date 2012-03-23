@@ -91,6 +91,7 @@ defaultConfigP = ConfigP { name = "<no name given>"
 newtype Process msg =
   Process { runP :: Supervisor -> IO (Channel msg) }
 
+spawn :: Supervisor -> Process msg -> IO (Channel msg)
 spawn = flip runP
 
 newtype ProcessM' m a =

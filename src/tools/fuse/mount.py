@@ -1,10 +1,9 @@
 #!/usr/bin/env python
 
-#    Copyright (C) 2006  Andrew Straw  <strawman@astraw.com>
-#
-#    This program can be distributed under the terms of the GNU LGPL.
-#    See the file COPYING.
-#
+
+#    Based on code by: Andrew Straw  <strawman@astraw.com>
+#    http://stuff.mit.edu/iap/2009/fuse/examples/hello.py
+
 
 import logging
 import sys, os, stat, errno

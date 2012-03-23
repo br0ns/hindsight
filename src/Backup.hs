@@ -1,4 +1,4 @@
-{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE ScopedTypeVariables, TypeSynonymInstances #-}
 
 module Backup
        where
@@ -16,6 +16,7 @@ import qualified Process.Log as Log
 import qualified Channel as Ch
 import qualified Process.KeyStore  as KS
 import qualified Process.HashStore as HS
+import qualified Process.HashStoreTypes as HST
 import qualified Process.BlobStore as BS
 import qualified Process.External  as Ext
 import qualified Process.Index     as Idx
@@ -55,6 +56,9 @@ import Control.Monad.State
 import Control.Monad
 import Control.Arrow (second, first)
 
+import GHC.ST
+import Data.BloomFilter
+import Data.BloomFilter.Hash (cheapHashes, Hashable(..))
 import Data.UUID
 
 import Data.Conduit hiding (Stop)
@@ -66,13 +70,17 @@ import Data.List hiding (group)
 import Data.Maybe
 import Data.Ord
 
+
 import Crypto.Simple (newMasterKey, readMasterKey)
 
 import Data.Serialize (Serialize(..), encode)
 import qualified Data.Serialize as Ser
 
+import qualified Data.BTree.BTree as T
+import qualified Data.BTree.Types as Ty
 import qualified Data.BTree.KVBackend.Files as Back
 import qualified Data.BTree.KVBackend.CachedExternal as CachedExt
+import qualified Data.BTree.Cache.STM as C
 
 instance Serialize ClockTime where
   put (TOD a b) = Ser.put (a, b)
@@ -311,7 +319,6 @@ goSnapshot statCh extCh base repo path = do
              defaultConfigP { name = "hash index" }
   hiCh <- spawn' hiP
   HS.recover irollback statCh hiCh extCh -- Recover from crash if necessary
-
   cache <- newMVar Set.empty
   let kiP         = localIndex repodir $
                     defaultConfigP { name = "key index (" ++ repo ++ ")" }
@@ -329,7 +336,7 @@ goSnapshot statCh extCh base repo path = do
   -- let's do this
   ksCh <- spawn' $ replicateB 3 -- TODO: paramaterise
           (ksP kiCh -|- hsP hiCh -|- bsP extCh)
-  removeMissing kiCh
+  -- removeMissing kiCh
   send statCh $ Say "  Calculating size"
   totSize <- runResourceT $ traverse statCh path $$ sumFileSize
   send statCh $ Say "  Transferring"
@@ -586,3 +593,33 @@ goSearch statCh kiCh base repo term = do
   sendBlock statCh Quiet
   forM_ (sort $ map fst kvs) $ \file ->
     putStrLn $ B.unpack file
+
+
+bloomStat base name version = do
+  let pri      = base </> "pri"
+      sec      = base </> "sec"
+      snap     = base </> "snap"
+  with (snapP base) $ \snapCh -> do
+    mbsnaps <- sendReply snapCh $ Idx.Lookup $ pack name :: IO (Maybe (Map.Map Int Snapshot))
+    case mbsnaps of
+      Nothing -> putStrLn $ "No snapshot named " ++ name
+      Just snaps -> do
+        if not (version `Map.member` snaps) || version < 0
+          then putStrLn $ "No such snapshot version"
+          else do
+          let snap = snaps Map.! version
+              snapref = reference snap
+              repo = name ++ "~" ++ show (clockTimeToEpoch $ timestamp snap)
+          c <- C.sizedParam 128 $ Back.evalFilesKV $ pri </> repo
+          root <- decode' "bloomStat" `fmap` B.readFile (pri </> repo </> "root")
+          print root
+          p <- T.makeParam 128 (Just $ root) c
+          _ :: Maybe (Maybe ByteString, HST.ID, [HST.ID]) <- T.execTree p $ T.lookup B.empty
+          putStrLn "foldli"
+          let mbf = newMB (cheapHashes 10) (16 * 2^20)
+          ls <- map snd `fmap` (T.execTree p $ T.toList)
+          print $ length ls
+          let bf = runST $ unsafeFreezeMB =<<
+                   (mbf >>= \bf -> mapM_ (insertMB bf . encode) ls >> return bf)
+          B.writeFile (pri </> repo </> "bloom") $
+            encode $ bitArrayB $ bf

@@ -157,6 +157,12 @@ go = do
             ["x", hac, path] -> do
               id <- readFile hac
               checkout True False base id 1 Nothing path
+        "bloom" ->
+          case args of
+            [src] -> bloomStat base repo version
+              where
+                (repo, version, Nothing) = location src
+
         _ -> putStrLn $ "Unknown command: " ++ cmd
     [] -> usage
 

@@ -84,6 +84,9 @@ executable hindsight
         -- crypto
         crypto-api == 0.8.*, cprng-aes == 0.2.*, entropy >= 0.2, salt == 0.0,
         scrypt == 0.3.*, skein == 0.1.*
+        ,
+        -- bloom filter
+        bloomfilter == 1.*
 
     if true
         ghc-options:    -funbox-strict-fields -Wall -fno-warn-hi-shadowing -fno-warn-name-shadowing

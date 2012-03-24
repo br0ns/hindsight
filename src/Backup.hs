@@ -681,13 +681,14 @@ collectGarbage base = do
                             defaultConfigP { name = "blobstore (gc)" }
               hsP hCh bCh = HS.hashStore cache statCh hCh bCh $
                             defaultConfigP { name = "hashstore (gc)" }
-          with (hsP hiChSec -|- bsP extCh) $ \hsCh -> do
-            blobs <- concat `fmap` mapM (setupKidx hsCh) snaps
-            -- gc mark
-            markBloom hiCh $! catMaybes blobs
-            -- gc sweep
-            GC.sweep hiCh extCh
-            flushChannel hiCh
+          with (bsP extCh) $ \bsCh ->
+            with (hsP hiChSec -|- bsP extCh) $ \hsCh -> do
+              blobs <- concat `fmap` mapM (setupKidx hsCh) snaps
+              -- gc mark
+              markBloom hiCh $! catMaybes blobs
+              -- gc sweep
+              GC.sweep hiCh extCh bsCh
+              flushChannel hiCh
   where
     setupKidx hsCh (name, snaps) = mapM (setupKidxOne hsCh) $
                                    zip (repeat name) $ Map.elems snaps

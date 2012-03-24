@@ -26,7 +26,7 @@ computeBloom kiCh = do
   hashes <- map (\(_, (_, _, hs)) -> hs) `fmap` (sendReply kiCh Idx.ToList)
   -- populate filter
   -- we use 16 bits per hash
-  let filter  = createB hashf (16 * length hashes) $ \mb ->
+  let filter  = createB hashf (16 * (max 1024 $ length hashes)) $ \mb ->
         mapM_ (mapM_ (insertMB mb)) hashes
   return filter
 

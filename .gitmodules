@@ -1,3 +1,6 @@
 [submodule "salt"]
 	path = salt
 	url = https://github.com/thoughtpolice/salt.git
+[submodule "bloomfilter"]
+	path = bloomfilter
+	url = git@github.com:brinchj/bloomfilter.git

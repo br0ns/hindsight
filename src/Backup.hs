@@ -367,7 +367,7 @@ goSnapshot statCh extCh base repo path = do
   -- let's do this
   ksCh <- spawn' $ replicateB 3 -- TODO: paramaterise
           (ksP kiCh -|- hsP hiCh -|- bsP extCh)
-  -- removeMissing kiCh
+  removeMissing kiCh
   send statCh $ Say "  Calculating size"
   totSize <- runResourceT $ traverse statCh path $$ sumFileSize
   send statCh $ Say "  Transferring"

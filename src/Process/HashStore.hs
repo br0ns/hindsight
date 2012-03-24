@@ -48,6 +48,7 @@ import Data.Maybe
 
 import Crypto.Flat (skein256)
 
+defaultColor = '\NUL'
 
 recover rollback statCh idxCh extCh = do
     ei <- try $ doesDirectoryExist rollback
@@ -105,14 +106,15 @@ hashStore mc statCh idxCh bsCh = new (hSup, hMsg, info "Started", hFlush)
           now <- liftIO $ getClockTime
           send statCh $ Stats.Completed now $ fromIntegral $ B.length v
         insert id blob = do
-          sendReply idxCh $! Idx.Modify (error "hashStore: exists") id blob
+          sendReply idxCh $! Idx.Modify (error "hashStore: exists") id
+            (defaultColor, blob)
           liftIO $ modifyMVar mc $ \s -> return $ (Set.delete id s, ())
 
 
     hMsg (Lookup id rep) = do
       mbx <- sendReply idxCh $ Idx.Lookup id
       case mbx of
-        Just blobId -> do
+        Just (_, blobId) -> do
           v <- sendReply bsCh $ BS.Retrieve blobId
           if skein256 v == id
             then replyTo rep $ Just v

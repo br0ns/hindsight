@@ -86,7 +86,7 @@ recover rollback statCh kidxCh hidxCh = do
         case mk of
           Nothing -> return ()
           Just (_, meta, hs) -> do
-            ls <- mapM findHash $ meta:hs
+            ls <- mapM findHash hs
             -- TODO: update reference sets
             when (any isNothing ls) $ do
               send kidxCh $ Idx.Delete key
@@ -147,16 +147,15 @@ keyStore workdir idxCh hsCh = new (handleSup, handleMsg,
                 replyTo rep $ Left $ show e
               Right ids -> do
                 meta <- liftIO mmeta
-                metaid <- sendReply hsCh $ HS.Insert meta
                 -- insert key
-                send idxCh $ Idx.Insert key (mbvs, metaid, ids)
+                send idxCh $ Idx.Insert key (mbvs, meta, ids)
                 replyTo rep $ Right True
 
     handleMsg (Retrieve k rep) = do
       mb <- sendReply idxCh $ Idx.Lookup k
       case mb of
         Nothing -> replyTo rep Nothing
-        Just (_, metaid, ids) -> do
+        Just (_, meta, ids) -> do
           chunks <- mapM (sendReply hsCh . HS.Lookup) ids
           replyTo rep $ B.concat `fmap` sequence chunks
 

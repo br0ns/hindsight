@@ -455,12 +455,12 @@ traverse statCh path =
               | isSymbolicLink stat -> return $ StateOpen all (path', stat)
               | otherwise           -> pull0 all
 
-type KIMessage = Idx.Message ByteString (Maybe ByteString, HS.ID, [HS.ID])
+type KIMessage = Idx.Message ByteString (Maybe ByteString, ByteString, [HS.ID])
 
 goInspect recursive go mbterm kiCh = do
   case mbterm of
     Just x' -> do
-      if x /= "" then do
+      if null x then do
         mbv <- sendReply kiCh $ Idx.Lookup key
         case mbv of
           Just v -> do
@@ -521,7 +521,7 @@ goCheckout' rec noData (kiCh :: Channel KIMessage) statCh extCh base repo mbterm
                   return undefined
                 Right v -> return v
 
-            unpackOne (key, (_, metahash, hashes)) = do
+            unpackOne (key, (_, metachunk, hashes)) = do
               hFlush stdout
               let path = dest </> B8.unpack key
                   dir  = takeDirectory path
@@ -529,7 +529,6 @@ goCheckout' rec noData (kiCh :: Channel KIMessage) statCh extCh base repo mbterm
               createDirectoryIfMissing True dir
               dirStat <- S.readPosixFile Nothing dir
               -- Get meta data
-              Just metachunk <- sendReply hsCh $ HS.Lookup metahash
               let stat = decode' "Metachunk" metachunk :: S.PosixFile
               -- Create posix file with correct permissions
               case S.fileType stat of

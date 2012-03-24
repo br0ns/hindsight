@@ -349,6 +349,9 @@ goSnapshot statCh extCh base repo path = do
   -- stop cleaner
   killThread pid
   flush ksCh kiCh hiCh
+  -- build bloom filter
+  filter <- computeBloom kiCh
+  safeWriteFileWith id (repodir </> "_bloom") $ encode $ bitArrayB filter
   -- release "locks"
   mapM_ removeDirectoryRecursive
     [irollback, rrollback]
@@ -612,7 +615,7 @@ bloomStat base name version = do
           root <- decode' "bloomStat" `fmap` B.readFile (pri </> repo </> "root")
           print root
           p <- T.makeParam 128 (Just $ root) c
-          _ :: Maybe (Maybe ByteString, HST.ID, [HST.ID]) <- T.execTree p $ T.lookup B.empty
+          _ :: Maybe (Maybe ByteString, ByteString, [HST.ID]) <- T.execTree p $ T.lookup B.empty
           putStrLn "foldli"
           let mbf = newMB (cheapHashes 10) (16 * 2^20)
           ls <- map snd `fmap` (T.execTree p $ T.toList)
@@ -621,3 +624,15 @@ bloomStat base name version = do
                    (mbf >>= \bf -> mapM_ (insertMB bf . encode) ls >> return bf)
           B.writeFile (pri </> repo </> "bloom") $
             encode $ bitArrayB $ bf
+
+computeBloom kiCh = do
+  -- compute size
+  hashes <- map (\(_, (_, _, hs)) -> hs) `fmap` (sendReply kiCh Idx.ToList)
+  -- populate filter
+  -- we use 16 bits per hash
+  let filter  = createB hashf (16 * length hashes) $ \mb ->
+        mapM_ (mapM_ (insertMB mb)) hashes
+      hashf x = [a, b, c, d]
+       where
+         (_ :: Char, a, b, c, d) = decode' "computeBloom: hashf" $ encode x
+  return filter

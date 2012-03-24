@@ -70,6 +70,7 @@ import Data.List hiding (group)
 import Data.Maybe
 import Data.Ord
 
+import qualified GC
 import GC.Bloom
 
 import Crypto.Simple (newMasterKey, readMasterKey)
@@ -684,6 +685,8 @@ collectGarbage base = do
             blobs <- concat `fmap` mapM (setupKidx hsCh) snaps
             -- gc mark
             markBloom hiCh $! catMaybes blobs
+            -- gc sweep
+            GC.sweep hiCh extCh
             flushChannel hiCh
   where
     setupKidx hsCh (name, snaps) = mapM (setupKidxOne hsCh) $

@@ -460,14 +460,13 @@ type KIMessage = Idx.Message ByteString (Maybe ByteString, ByteString, [HS.ID])
 goInspect recursive go mbterm kiCh = do
   case mbterm of
     Just x' -> do
-      if null x then do
+      if null x then goDir else do
         mbv <- sendReply kiCh $ Idx.Lookup key
         case mbv of
           Just v -> do
             typ <- S.fileType `fmap` go (key, v)
             when (typ == S.Directory) goDir
           Nothing -> putStrLn "No such file or directory"
-        else goDir
       where
         goDir = do
           kvs <- sendReply kiCh $ Idx.Search search

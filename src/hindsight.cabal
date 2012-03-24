@@ -30,6 +30,7 @@ executable hindsight
         Supervisor
         Stat
         Util
+        GC.Bloom
         Crypto.Flat
         Crypto.Simple
         Data.BTree.BTree

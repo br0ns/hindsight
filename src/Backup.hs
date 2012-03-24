@@ -70,6 +70,7 @@ import Data.List hiding (group)
 import Data.Maybe
 import Data.Ord
 
+import GC.Bloom
 
 import Crypto.Simple (newMasterKey, readMasterKey)
 
@@ -91,7 +92,7 @@ data Snapshot =
   Snapshot
   { timestamp :: ClockTime
   , reference :: ByteString}
-  deriving (Eq)
+  deriving (Eq, Show)
 
 instance Serialize Snapshot where
   put (Snapshot t r) = Ser.put (t, r)
@@ -255,6 +256,69 @@ withCacheDirectory base f = do
     --                               `catch` \(e :: IOError) -> return ()
 
 
+inspect' :: (Channel Ext.Message
+                   -> Channel Message
+                   -> Channel KIMessage
+                   -> FilePath
+                   -> [Char]
+                   -> t
+                   -> IO a) ->
+            Bool -> String -> String -> Snapshot -> t -> IO a
+inspect' go usePri base name snapshot mbdir = do
+  let pri      = base </> "pri"
+      sec      = base </> "sec"
+      snap     = base </> "snap"
+  let snapref = reference snapshot
+      repo = name ++ "~" ++ show (clockTimeToEpoch $ timestamp snapshot)
+  withCacheDirectory base $ \tmp -> do
+    statP <- stats
+    with statP $ \statCh -> do
+      extP <- backend statCh base $ Just tmp
+      with extP $ \extCh -> do
+        initDir (sec </> repo) $ \d -> do
+          tarball <- sendReply extCh $ Ext.Get snapref
+          untar statCh d tarball
+          initDir (pri </> repo) $ \d -> do
+            goCheckout statCh extCh sec repo (Just "root") d
+
+          cache <- newMVar Set.empty
+          let hiP  = localIndex (sec </> "idx") $
+                     defaultConfigP { name = "hash index" }
+              kiP         = localIndex (sec </> repo) $
+                            defaultConfigP { name = "key index (" ++ repo ++ ")" }
+              bsP eCh     = BS.blobStore "" maxBlob eCh $
+                            defaultConfigP { name = "blobstore (" ++ repo ++ ")" }
+              hsP hCh bCh = HS.hashStore cache statCh hCh bCh $
+                            defaultConfigP { name = "hashstore (" ++ repo ++ ")" }
+              ksP hCh bCh = KS.keyStore "" hCh bCh $
+                            defaultConfigP { name = "keystore (" ++ repo ++ ")" }
+          with hiP $ \hiCh ->
+            with kiP $ \kiCh ->
+              with (ksP kiCh -|- hsP hiCh -|- bsP extCh) $ \ksCh ->
+              if usePri then do
+                let kiP = remoteIndex ksCh (pri </> repo) $
+                          defaultConfigP { name = "key index (" ++ repo ++ ")" }
+                with kiP $ \(kiCh :: Channel KIMessage) ->
+                  go extCh statCh kiCh pri repo mbdir
+              else
+                go extCh statCh kiCh pri repo mbdir
+  where
+    initDir d k = do
+      ex <- doesDirectoryExist d
+      unless ex $ do
+        createDirectoryIfMissing True d
+      k d
+
+
+
+inspect :: (Channel Ext.Message
+                   -> Channel Message
+                   -> Channel KIMessage
+                   -> FilePath
+                   -> [Char]
+                   -> t
+                   -> IO a) ->
+            String -> String -> Int -> t -> IO ()
 inspect go base name version mbdir = do
   let pri      = base </> "pri"
       sec      = base </> "sec"
@@ -268,43 +332,9 @@ inspect go base name version mbdir = do
           then putStrLn $ "No such snapshot version"
           else do
           let snap = snaps Map.! version
-              snapref = reference snap
-              repo = name ++ "~" ++ show (clockTimeToEpoch $ timestamp snap)
-          withCacheDirectory base $ \tmp -> do
-            statP <- stats
-            with statP $ \statCh -> do
-              extP <- backend statCh base $ Just tmp
-              with extP $ \extCh -> do
-                initDir (sec </> repo) $ \d -> do
-                  tarball <- sendReply extCh $ Ext.Get snapref
-                  untar statCh d tarball
-                initDir (pri </> repo) $ \d -> do
-                  goCheckout statCh extCh sec repo (Just "root") d
+          void $ inspect' go True base name snap mbdir
 
-                cache <- newMVar Set.empty
-                let hiP  = localIndex (sec </> "idx") $
-                           defaultConfigP { name = "hash index" }
-                    kiP         = localIndex (sec </> repo) $
-                                  defaultConfigP { name = "key index (" ++ repo ++ ")" }
-                    bsP eCh     = BS.blobStore "" maxBlob eCh $
-                                  defaultConfigP { name = "blobstore (" ++ repo ++ ")" }
-                    hsP hCh bCh = HS.hashStore cache statCh hCh bCh $
-                                  defaultConfigP { name = "hashstore (" ++ repo ++ ")" }
-                    ksP hCh bCh = KS.keyStore "" hCh bCh $
-                                  defaultConfigP { name = "keystore (" ++ repo ++ ")" }
-                with hiP $ \hiCh ->
-                  with kiP $ \kiCh ->
-                  with (ksP kiCh -|- hsP hiCh -|- bsP extCh) $ \ksCh -> do
-                    let kiP = remoteIndex ksCh (pri </> repo) $
-                              defaultConfigP { name = "key index (" ++ repo ++ ")" }
-                    with kiP $ \(kiCh :: Channel KIMessage) -> do
-                      go extCh statCh kiCh pri repo mbdir
-  where
-    initDir d k = do
-      ex <- doesDirectoryExist d
-      unless ex $ do
-        createDirectoryIfMissing True d
-        k d
+
 
 goSnapshot statCh extCh base repo path = do
   let idx       = base </> "idx"
@@ -625,14 +655,45 @@ bloomStat base name version = do
           B.writeFile (pri </> repo </> "bloom") $
             encode $ bitArrayB $ bf
 
-computeBloom kiCh = do
-  -- compute size
-  hashes <- map (\(_, (_, _, hs)) -> hs) `fmap` (sendReply kiCh Idx.ToList)
-  -- populate filter
-  -- we use 16 bits per hash
-  let filter  = createB hashf (16 * length hashes) $ \mb ->
-        mapM_ (mapM_ (insertMB mb)) hashes
-      hashf x = [a, b, c, d]
-       where
-         (_ :: Char, a, b, c, d) = decode' "computeBloom: hashf" $ encode x
-  return filter
+
+collectGarbage base = do
+  let pri      = base </> "pri"
+      sec      = base </> "sec"
+  with (snapP base) $ \snapCh -> do
+    snaps <- filter (('_'/=) . B.head . fst) `fmap` sendReply snapCh Idx.ToList
+             :: IO [(ByteString, Map.Map Int Snapshot)]
+    statP <- stats
+    with statP $ \statCh -> do
+      send statCh Quiet
+      extP <- backend statCh base Nothing
+      with extP $ \extCh -> do
+        let  hiPSec = localIndex (sec </> "idx") $
+                      defaultConfigP { name = "hash index" }
+                      :: Process (Idx.Message HST.ID (Char, BS.ID))
+             hiP    = localIndex (pri </> "idx") $
+                      defaultConfigP { name = "hash index" }
+                      :: Process (Idx.Message HST.ID (Char, BS.ID))
+        -- setup hash store
+        cache <- newMVar Set.empty
+        with hiPSec $ \hiChSec -> with hiP $ \hiCh -> do
+          let bsP eCh     = BS.blobStore "" maxBlob eCh $
+                            defaultConfigP { name = "blobstore (gc)" }
+              hsP hCh bCh = HS.hashStore cache statCh hCh bCh $
+                            defaultConfigP { name = "hashstore (gc)" }
+          with (hsP hiChSec -|- bsP extCh) $ \hsCh -> do
+            blobs <- concat `fmap` mapM (setupKidx hsCh) snaps
+            -- gc mark
+            markBloom hiCh $! catMaybes blobs
+            flushChannel hiCh
+  where
+    setupKidx hsCh (name, snaps) = mapM (setupKidxOne hsCh) $
+                                   zip (repeat name) $ Map.elems snaps
+    setupKidxOne hsCh (name, snap) = inspect' go False base (unpack name) snap Nothing
+      where
+        go _extCh _statCh kiCh _pri _repo Nothing = do
+          mv <- sendReply kiCh $ Idx.Lookup $ B.pack "_bloom"
+          case mv of
+            Nothing -> error $ "No Bloom file: " ++ show name
+            Just (_, _, hs) -> do
+              ls <- mapM (sendReply hsCh . HST.Lookup) hs
+              return $ Just $ B.concat $ map fromJust ls

@@ -157,6 +157,8 @@ go = do
             ["x", hac, path] -> do
               id <- readFile hac
               checkout True False base id 1 Nothing path
+        "gc" ->
+          collectGarbage base
         "bloom" ->
           case args of
             [src] -> bloomStat base repo version

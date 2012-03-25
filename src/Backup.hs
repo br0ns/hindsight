@@ -229,12 +229,14 @@ checkout rec noData base name version mbdir dest =
             goCheckout' rec noData k s e base repo mbdir dest) base name version mbdir
 
 deleteSnapshot base repo version = do
-  with (snapP base) $ \snapCh -> do
+  extP <- backend undefined base Nothing
+  with (snapP base) $ \snapCh -> with extP $ \extCh -> do
     x <- sendReply snapCh $ Idx.Lookup key :: IO (Maybe (Map.Map Int Snapshot))
     case x of
       Nothing -> putStrLn $ "Not found: " ++ repo
       Just m  | version `Map.member` m ->
-        do send snapCh $ Idx.Insert key $ Map.delete version m
+        do sendBlock extCh $ Ext.Del $ reference (m Map.! version)
+           send snapCh $ Idx.Insert key $ Map.delete version m
            flushChannel snapCh
            putStrLn $ "Deleted: " ++ repo ++ "~" ++ show version
               | otherwise -> putStrLn "what"
@@ -256,6 +258,8 @@ withCacheDirectory base f = do
     --                             mapM_ removeFile (map (path </>) fs)
     --                               `catch` \(e :: IOError) -> return ()
 
+snapRepo name snap =
+  name ++ "~" ++ show (clockTimeToEpoch $ timestamp snap)
 
 inspect' :: (Channel Ext.Message
                    -> Channel Message
@@ -270,7 +274,7 @@ inspect' go usePri base name snapshot mbdir = do
       sec      = base </> "sec"
       snap     = base </> "snap"
   let snapref = reference snapshot
-      repo = name ++ "~" ++ show (clockTimeToEpoch $ timestamp snapshot)
+      repo = snapRepo name snapshot
   withCacheDirectory base $ \tmp -> do
     statP <- stats
     with statP $ \statCh -> do
@@ -689,6 +693,9 @@ collectGarbage base = do
               -- gc sweep
               GC.sweep hiCh extCh bsCh
               flushChannel hiCh
+              -- gc mark meta
+
+              -- gc sweep meta
   where
     setupKidx hsCh (name, snaps) = mapM (setupKidxOne hsCh) $
                                    zip (repeat name) $ Map.elems snaps

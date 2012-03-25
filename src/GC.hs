@@ -15,7 +15,8 @@ import Util
 
 import Control.Monad
 
-minHashPerBlob = 16
+minHashPerBlob = 32
+minBlobs       =  2
 
 sweep hiCh extCh bsCh = do
   (dead, alive) <- sendReply hiCh $ Idx.Foldli go (Map.empty, Map.empty)
@@ -26,12 +27,22 @@ sweep hiCh extCh bsCh = do
   mapM_ (send extCh . Ext.Del . encode) $ Map.keys dead
   flushChannel extCh
   mapM_ (send hiCh . Idx.Delete) $ concat $ Map.elems dead
+  flushChannel hiCh
 
   -- merge small blobs
-  mapM_ merge $ takeWhile ((< minHashPerBlob) . length . fst) $
-    sortBy (\(a, _) (b, _) -> length a `compare` length b) $
-    map swap $ Map.toList alive
-  flushChannel bsCh
+  let blobs = takeWhile ((< (minHashPerBlob `div` 2)) . length . snd) $
+              sortBy (\(_, a) (_, b) -> length a `compare` length b) $
+              Map.toList alive
+  when (length blobs >= minBlobs) $ do
+    putStrLn $ concat ["Rewriting ", show (length blobs), " small blobs."]
+    mapM_ merge blobs
+    flushChannel bsCh
+    flushChannel hiCh
+    -- delete blobs now, in case no dead hash
+    mapM_ (send extCh . Ext.Del . encode) $ map fst blobs
+    flushChannel extCh
+    -- run again to remove dead blobs and hashes
+    sweep hiCh extCh bsCh
   where
     go (dead, alive) hash (clr, ID (blobid, pos))
       | clr == 'd' && blobid `Map.member` alive = (dead, alive)
@@ -40,12 +51,10 @@ sweep hiCh extCh bsCh = do
       where
         alive' = Map.insertWith (++) blobid [(hash, pos)] alive
 
-    merge (hs, blobid) = do
-      chunks <- decode' "GC:sweep" `fmap`
-                (sendReply extCh $ Ext.Get $ encode blobid)
-                :: IO [B.ByteString]
+    merge (blobid, hs) = do
       forM_ hs $ \(hash, pos) -> do
-        send bsCh $ Store hash (chunks !! fromIntegral pos) $ callback hash
+        chunk <- sendReply bsCh $ Retrieve $ ID (blobid, pos)
+        send bsCh $ Store hash chunk $ callback hash
       where
         callback hash id = do
-          send hiCh $ Idx.Modify_ (\(clr, _) _ -> (clr, id)) hash ('\NUL', id)
+          send hiCh $ Idx.Insert hash ('\NUL', id)

@@ -67,6 +67,7 @@ import qualified Data.Conduit.Extra as CE
 
 import Data.Function
 import Data.List hiding (group)
+import Data.List as List
 import Data.Maybe
 import Data.Ord
 
@@ -139,7 +140,11 @@ recordSnapshot snapCh extCh name dir = do
   let snapshot = Snapshot now id
   send extCh $ Ext.Put id tarball
   send snapCh $ Idx.Modify_
-    (\_ m -> Map.insert ((1 :: Int) + (fst $ Map.findMax m)) snapshot m)
+    (\_ m ->
+      if Map.null m
+      then Map.singleton 1 snapshot
+      else Map.insert ((1 :: Int) + (fst $ Map.findMax m)) snapshot m
+    )
     key
     $ Map.singleton 1 snapshot
   where
@@ -662,14 +667,17 @@ bloomStat base name version = do
 
 
 collectGarbage base = do
-  let pri      = base </> "pri"
-      sec      = base </> "sec"
-  with (snapP base) $ \snapCh -> do
-    snaps <- filter (('_'/=) . B.head . fst) `fmap` sendReply snapCh Idx.ToList
-             :: IO [(ByteString, Map.Map Int Snapshot)]
-    statP <- stats
-    with statP $ \statCh -> do
-      send statCh Quiet
+  statP <- stats
+  with statP $ \statCh -> do
+    send statCh Quiet
+    send statCh $ Say "Deleting old hash indexes"
+    -- remove old __pidx and __sidx
+    mapM_ (prune statCh) ["__pidx", "__sidx"]
+    let pri      = base </> "pri"
+        sec      = base </> "sec"
+    with (snapP base) $ \snapCh -> do
+      snaps <- filter (('_' /=) . B.head . fst) `fmap` sendReply snapCh Idx.ToList
+               :: IO [(ByteString, Map.Map Int Snapshot)]
       extP <- backend statCh base Nothing
       with extP $ \extCh -> do
         let  hiPSec = localIndex (sec </> "idx") $
@@ -694,8 +702,15 @@ collectGarbage base = do
               GC.sweep hiCh extCh bsCh
               flushChannel hiCh
               -- gc mark meta
-
+              blobs <- forM (concat $ map (\(name, snaps) -> map (snapRepo $ unpack name) $ Map.elems snaps) snaps) $ \repo ->
+                B.readFile $ sec </> repo </> "_bloom"
+              ex <- doesDirectoryExist $ sec </> "pidx"
+              if ex then do
+                blob <- B.readFile $ sec </> "pidx" </> "_bloom"
+                markBloom hiChSec (blob : blobs)
+                else markBloom hiChSec blobs
               -- gc sweep meta
+              GC.sweep hiChSec extCh bsCh
   where
     setupKidx hsCh (name, snaps) = mapM (setupKidxOne hsCh) $
                                    zip (repeat name) $ Map.elems snaps
@@ -708,3 +723,21 @@ collectGarbage base = do
             Just (_, _, hs) -> do
               ls <- mapM (sendReply hsCh . HST.Lookup) hs
               return $ Just $ B.concat $ map fromJust ls
+    prune statCh name = do
+      extP <- backend statCh base Nothing
+      with (snapP base) $ \snapCh -> with extP $ \extCh -> do
+        x <- sendReply snapCh $ Idx.Lookup key :: IO (Maybe (Map.Map Int Snapshot))
+        case x of
+          Nothing -> return ()
+          Just m | Map.null m -> return ()
+                 | otherwise -> do
+            forM_ (List.init $ Map.elems m) $ \snap -> do
+              send statCh $ SetMessage $ snapRepo name snap
+              send extCh $ Ext.Del $ reference snap
+            flushChannel extCh
+            let (_, a) = Map.findMax m
+            send snapCh $ Idx.Insert key $ Map.singleton 1 a
+            flushChannel snapCh
+      where
+        key = pack name
+

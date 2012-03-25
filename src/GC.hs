@@ -11,6 +11,7 @@ import Data.List
 
 import Data.Pickle
 import Data.Tuple
+import Data.Ord (comparing)
 import Util
 
 import Control.Monad
@@ -28,9 +29,13 @@ sweep hiCh extCh bsCh = do
   mapM_ (send hiCh . Idx.Delete) $ concat $ Map.elems dead
 
   -- merge small blobs
-  mapM_ merge $ takeWhile ((< minHashPerBlob) . length . fst) $
-    sortBy (\(a, _) (b, _) -> length a `compare` length b) $
-    map swap $ Map.toList alive
+  let blobs = takeWhile ((< minHashPerBlob) . length . fst) $
+              sortBy (comparing $ length.fst) $
+              map swap $ Map.toList alive
+  unless (length blobs < 2) $ do
+    merge blobs
+    forM_ blobs $ \(_, blobid) -> do
+      send extCh $ Ext.Del $ encode blobid
   flushChannel bsCh
   where
     go (dead, alive) hash (clr, ID (blobid, pos))
@@ -40,7 +45,7 @@ sweep hiCh extCh bsCh = do
       where
         alive' = Map.insertWith (++) blobid [(hash, pos)] alive
 
-    merge (hs, blobid) = do
+    merge blobs = forM_ blobs $ \(hs, blobid) -> do
       chunks <- decode' "GC:sweep" `fmap`
                 (sendReply extCh $ Ext.Get $ encode blobid)
                 :: IO [B.ByteString]

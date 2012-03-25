@@ -11,7 +11,7 @@ module Process.BlobStore
 import Process
 import Supervisor
 
-import Util (byteStringToFileName, safeWriteFileWith)
+import Util (decode', byteStringToFileName, safeWriteFileWith)
 
 import System.Directory
 import System.FilePath
@@ -81,7 +81,8 @@ blobStore workdir minBlobSize extCh =
                   flush
            Retrieve (ID (blobId, idx)) rep ->
              do blob <- sendReply extCh $ Ext.Get $ encode blobId
-                replyTo rep $! (!! (fromIntegral idx)) $ either error id $ decode blob
+                replyTo rep $! (!! (fromIntegral idx)) $
+                  decode' "Blobstore: retrieve" blob
       where
         store hash v cb = do
           modify $ \(blobId, blob) -> (blobId, (hash, v, cb) : blob)

@@ -273,46 +273,49 @@ inspect' :: (Channel Ext.Message
                    -> [Char]
                    -> t
                    -> IO a) ->
-            Bool -> String -> String -> Snapshot -> t -> IO a
-inspect' go usePri base name snapshot mbdir = do
-  let pri      = base </> "pri"
-      sec      = base </> "sec"
-      snap     = base </> "snap"
-  let snapref = reference snapshot
-      repo = snapRepo name snapshot
-  withCacheDirectory base $ \tmp -> do
-    statP <- stats
-    with statP $ \statCh -> do
-      extP <- backend statCh base $ Just tmp
-      with extP $ \extCh -> do
-        initDir (sec </> repo) $ \d -> do
-          tarball <- sendReply extCh $ Ext.Get snapref
-          untar statCh d tarball
-          initDir (pri </> repo) $ \d -> do
-            goCheckout statCh extCh sec repo (Just "root") d
-
-          cache <- newMVar Set.empty
-          let hiP  = localIndex (sec </> "idx") $
-                     defaultConfigP { name = "hash index" }
-              kiP         = localIndex (sec </> repo) $
-                            defaultConfigP { name = "key index (" ++ repo ++ ")" }
-              bsP eCh     = BS.blobStore "" maxBlob eCh $
-                            defaultConfigP { name = "blobstore (" ++ repo ++ ")" }
-              hsP hCh bCh = HS.hashStore cache statCh hCh bCh $
-                            defaultConfigP { name = "hashstore (" ++ repo ++ ")" }
-              ksP hCh bCh = KS.keyStore "" hCh bCh $
-                            defaultConfigP { name = "keystore (" ++ repo ++ ")" }
-          with hiP $ \hiCh ->
-            with kiP $ \kiCh ->
-              with (ksP kiCh -|- hsP hiCh -|- bsP extCh) $ \ksCh ->
-              if usePri then do
-                let kiP = remoteIndex ksCh (pri </> repo) $
-                          defaultConfigP { name = "key index (" ++ repo ++ ")" }
-                with kiP $ \(kiCh :: Channel KIMessage) ->
-                  go extCh statCh kiCh pri repo mbdir
-              else
-                go extCh statCh kiCh pri repo mbdir
+            Bool -> Bool -> String -> String -> Snapshot -> t -> IO a
+inspect' cb usePri useCache base name snapshot mbdir = do
+  if not useCache then go Nothing else
+    withCacheDirectory base $ \tmp -> go $ Just tmp
   where
+    go mtmp = do
+      let pri      = base </> "pri"
+          sec      = base </> "sec"
+          snap     = base </> "snap"
+          snapref  = reference snapshot
+          repo = snapRepo name snapshot
+      statP <- stats
+      with statP $ \statCh -> do
+        extP <- backend statCh base mtmp
+        with extP $ \extCh -> do
+          initDir (sec </> repo) $ \d -> do
+            tarball <- sendReply extCh $ Ext.Get snapref
+            untar statCh d tarball
+            initDir (pri </> repo) $ \d -> do
+              goCheckout statCh extCh sec repo (Just "root") d
+
+            cache <- newMVar Set.empty
+            let hiP  = localIndex (sec </> "idx") $
+                       defaultConfigP { name = "hash index" }
+                kiP         = localIndex (sec </> repo) $
+                              defaultConfigP { name = "key index (" ++ repo ++ ")" }
+                bsP eCh     = BS.blobStore "" maxBlob eCh $
+                              defaultConfigP { name = "blobstore (" ++ repo ++ ")" }
+                hsP hCh bCh = HS.hashStore cache statCh hCh bCh $
+                              defaultConfigP { name = "hashstore (" ++ repo ++ ")" }
+                ksP hCh bCh = KS.keyStore "" hCh bCh $
+                              defaultConfigP { name = "keystore (" ++ repo ++ ")" }
+            with hiP $ \hiCh ->
+              with kiP $ \kiCh ->
+                with (ksP kiCh -|- hsP hiCh -|- bsP extCh) $ \ksCh ->
+                if usePri then do
+                  let kiP = remoteIndex ksCh (pri </> repo) $
+                            defaultConfigP { name = "key index (" ++ repo ++ ")" }
+                  with kiP $ \(kiCh :: Channel KIMessage) ->
+                    cb extCh statCh kiCh pri repo mbdir
+                else
+                  cb extCh statCh kiCh pri repo mbdir
+
     initDir d k = do
       ex <- doesDirectoryExist d
       unless ex $ do
@@ -329,7 +332,7 @@ inspect :: (Channel Ext.Message
                    -> t
                    -> IO a) ->
             String -> String -> Int -> t -> IO ()
-inspect go base name version mbdir = do
+inspect cb base name version mbdir = do
   let pri      = base </> "pri"
       sec      = base </> "sec"
       snap     = base </> "snap"
@@ -342,7 +345,7 @@ inspect go base name version mbdir = do
           then putStrLn $ "No such snapshot version"
           else do
           let snap = snaps Map.! version
-          void $ inspect' go True base name snap mbdir
+          void $ inspect' cb True True base name snap mbdir
 
 
 
@@ -679,7 +682,7 @@ collectGarbage base = do
       snaps <- filter (('_' /=) . B.head . fst) `fmap` sendReply snapCh Idx.ToList
                :: IO [(ByteString, Map.Map Int Snapshot)]
       extP <- backend statCh base Nothing
-      with extP $ \extCh -> do
+      with extP $ \extCh -> withTemporaryDirectory "hindsight-" $ \tmp -> do
         let  hiPSec = localIndex (sec </> "idx") $
                       defaultConfigP { name = "hash index" }
                       :: Process (Idx.Message HST.ID (Char, BS.ID))
@@ -689,7 +692,7 @@ collectGarbage base = do
         -- setup hash store
         cache <- newMVar Set.empty
         with hiPSec $ \hiChSec -> with hiP $ \hiCh -> do
-          let bsP eCh     = BS.blobStore "" maxBlob eCh $
+          let bsP eCh     = BS.blobStore tmp maxBlob eCh $
                             defaultConfigP { name = "blobstore (gc)" }
               hsP hCh bCh = HS.hashStore cache statCh hCh bCh $
                             defaultConfigP { name = "hashstore (gc)" }
@@ -714,7 +717,8 @@ collectGarbage base = do
   where
     setupKidx hsCh (name, snaps) = mapM (setupKidxOne hsCh) $
                                    zip (repeat name) $ Map.elems snaps
-    setupKidxOne hsCh (name, snap) = inspect' go False base (unpack name) snap Nothing
+    setupKidxOne hsCh (name, snap) = inspect' go False False
+                                     base (unpack name) snap Nothing
       where
         go _extCh _statCh kiCh _pri _repo Nothing = do
           mv <- sendReply kiCh $ Idx.Lookup $ B.pack "_bloom"

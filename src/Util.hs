@@ -4,7 +4,6 @@ module Util
        ( byteStringToFileName
        , fileNameToByteString
        , clearDirectory
-       , atomicFileWrite
        , safeWriteFileWith
        , safeReadFileWith
        , safeAppendFile

@@ -101,7 +101,8 @@ instance Serialize Snapshot where
   get = do (t, r) <- Ser.get
            return $ Snapshot t r
 
-maxBlob = 2 * (1024 ^ 2)
+-- maxBlob = 2 * (1024 ^ 2)
+maxBlob = 1023
 
 localIndex dir = Idx.index dir $ Back.evalFilesKV dir
 remoteIndex extCh dir =
@@ -705,7 +706,9 @@ collectGarbage base = do
               GC.sweep hiCh extCh bsCh
               flushChannel hiCh
               -- gc mark meta
-              blobs <- forM (concat $ map (\(name, snaps) -> map (snapRepo $ unpack name) $ Map.elems snaps) snaps) $ \repo ->
+              blobs <- forM (concat $ map (\(name, snaps) ->
+                                            map (snapRepo $ unpack name) $
+                                            Map.elems snaps) snaps) $ \repo ->
                 B.readFile $ sec </> repo </> "_bloom"
               ex <- doesDirectoryExist $ sec </> "pidx"
               if ex then do
@@ -744,4 +747,3 @@ collectGarbage base = do
             flushChannel snapCh
       where
         key = pack name
-

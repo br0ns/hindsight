@@ -32,4 +32,4 @@ instance Interval Skein256 where
 skein256 :: B.ByteString -> Skein256
 skein256 s = Skein256 $ encode h
   where
-    h = hash' s :: Skein_256_224
+    h = hash' s :: Skein_256_256

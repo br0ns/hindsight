@@ -16,7 +16,8 @@ import Prelude hiding (lookup)
 import System.Directory
 import System.FilePath
 
-import Util
+import Util ( safeKill, safeForkIO,
+              decode', safeWriteFileWith, safeReadFileWith)
 
 import Channel
 import Process
@@ -110,7 +111,7 @@ index dir runBackend = newM (hSup, hMsg, init, hFlush, run)
       takeMVar l
       -- save root
       r <- T.execTree p T.save
-      atomicFileWrite rootFile $ dumps r
+      safeWriteFileWith id rootFile $ dumps r
       -- release lock
       putMVar l ()
 
@@ -141,6 +142,6 @@ index dir runBackend = newM (hSup, hMsg, init, hFlush, run)
     getRoot path =
       do exists <- doesFileExist path
          if exists
-           then do root <- B.readFile path
+           then do root <- safeReadFileWith id path
                    Just `fmap` (return $ decode' "Index: Root" root)
            else return Nothing

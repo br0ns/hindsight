@@ -322,7 +322,7 @@ liftSTM  = CacheSTM . stm
 fail     = CacheSTM . throwError
 
 
-instance ( Show k, S.Serialize k, S.Serialize v, Ord k, Eq k, Eq v
+instance ( S.Serialize k, S.Serialize v, Ord k, Eq k, Eq v
          , Hashable k, KV.KVBackend m k v) =>
          C.Cache (CacheSTM m k v) (Param m k v) k v where
   store  = store

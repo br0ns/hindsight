@@ -73,7 +73,7 @@ executable hindsight
         conduit == 0.2.*
         ,
         -- bytestring
-        bytestring == 0.9.*, base16-bytestring == 0.1.*, base64-bytestring == 0.1.*,
+        bytestring == 0.9.*, base16-bytestring == 0.1.*, base64-bytestring == 0.1.1.0,
         cereal == 0.3.*
         ,
         -- unix
@@ -83,8 +83,8 @@ executable hindsight
         directory == 1.*, filepath == 1.*
         ,
         -- crypto
-        crypto-api == 0.8.*, cprng-aes == 0.2.*, entropy >= 0.2, salt == 0.0,
-        scrypt == 0.3.*, skein == 0.1.*
+        crypto-api == 0.8.*, cprng-aes == 0.2.*, entropy >= 0.2.0, salt == 0.0,
+        skein == 0.1.*
         ,
         -- bloom filter
         bloomfilter == 1.*

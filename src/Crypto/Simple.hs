@@ -18,7 +18,6 @@ import Crypto.Classes (hash')
 import Crypto.HMAC (MacKey(..), hmac')
 
 import Crypto.Skein (Skein_256_256)
-import Crypto.Scrypt (scrypt')
 
 
 type PlainText  = ByteString

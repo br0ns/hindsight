@@ -101,8 +101,7 @@ instance Serialize Snapshot where
   get = do (t, r) <- Ser.get
            return $ Snapshot t r
 
--- maxBlob = 2 * (1024 ^ 2)
-maxBlob = 1023
+maxBlob = 2 * (1024 ^ 2)
 
 localIndex dir = Idx.index dir $ Back.evalFilesKV dir
 remoteIndex extCh dir =

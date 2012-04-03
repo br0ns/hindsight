@@ -111,6 +111,7 @@ go = do
       base <- expandUser hindsightBase
       createDirectoryIfMissing True base
       case cmd of
+        "help"     -> usage
         "init"     -> Backup.init base
         "snapshot" ->
           case args of
@@ -165,7 +166,10 @@ go = do
               where
                 (repo, version, Nothing) = location src
 
-        _ -> putStrLn $ "Unknown command: " ++ cmd
+        _ -> do
+          name <- getProgName
+          putStrLn $ "Unknown command: " ++ cmd
+          putStrLn $ "Try: " ++ name ++ " help"
     [] -> usage
 
 main = do go `catch` \ (e :: SomeException) -> print e

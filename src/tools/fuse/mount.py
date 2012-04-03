@@ -128,7 +128,7 @@ if __name__ == '__main__':
     SNAPSHOT = sys.argv[1]
     mount = os.path.realpath(sys.argv[2])
 
-    CACHE_DIR = sys.path[0] + "/" + SNAPSHOT.rsplit("~", 1)[0] + ".cache"
+    CACHE_DIR = mount + ".cache"
 
     if not (os.path.exists(mount)):
         os.mkdir(mount)

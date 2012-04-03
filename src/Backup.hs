@@ -427,11 +427,11 @@ goSnapshot statCh extCh base repo path = do
       mapM_ (sendFile ksCh) lst
 
     sendFile ksCh (file, stat) = do
-      let modtime = modificationTime stat
+      let ctime = statusChangeTime stat
       rep <- liftIO newEmptyTMVarIO
       liftIO $ send ksCh $
         KS.Insert
-        (Just $ encode $ fromEnum modtime)
+        (Just $ encode $ fromEnum ctime)
         (toKey file)
         (encode `fmap` S.readPosixFile (Just stat) file)
         (if isRegularFile stat then KS.File file

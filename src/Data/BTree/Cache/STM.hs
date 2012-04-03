@@ -27,6 +27,8 @@ import Control.Monad
 import Control.Monad.Trans
 import Control.Monad.Reader
 
+import Control.Exception
+
 import Data.Either
 import Data.Maybe
 import Data.Time.Clock
@@ -225,15 +227,11 @@ withGeneration p f = do
       else do writeTVar (genId p) $! n + 1
               return $! n + 1
   -- compute
-  x <- f n
-
-  -- end generation
-  liftIO $ atomically $ do
-    a <- readTVar $ genActive p
-    writeTVar (genActive p) $! a - 1
-
-  -- yield result
-  return x
+  liftIO $ finally (f n) $ do
+    -- end generation
+    liftIO $ atomically $ do
+      a <- readTVar $ genActive p
+      writeTVar (genActive p) $! a - 1
 
 
 flush p = do

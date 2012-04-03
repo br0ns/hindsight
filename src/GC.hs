@@ -32,8 +32,7 @@ sweep hiCh extCh bsCh = do
 
   -- merge small blobs
   let blobs = takeWhile ((< (minHashPerBlob `div` 2)) . length . snd) $
-              sortBy (comparing $ length.snd) $
-              Map.toList alive
+              sortBy (comparing $ length.snd) $ Map.toList alive
   when (length blobs >= minBlobs) $ do
     putStrLn $ concat ["Rewriting ", show (length blobs), " small blobs."]
     merge blobs

@@ -5,7 +5,8 @@ module Backup
 
 import Prelude hiding (catch)
 
-import Util (epoch, decode', expandUser, safeWriteFileWith)
+import Util (epoch, decode', expandUser,
+             safeWriteFileWith, byteStringToFileName)
 import Config
 import Supervisor
 import Process
@@ -161,7 +162,7 @@ seal base = do
       with (snapP base) $ \snapCh -> do
         let record name repo = recordSnapshot snapCh extCh name $ sec </> repo
         send statCh $ Say "Saving index"
-        goSnapshot statCh extCh sec "pidx" $ pri </> "idx"
+        goSnapshot statCh extCh sec "pidx" (pri </> "idx") Nothing
         send statCh $ ClearGoal
         send statCh $ Say "Transferring tarballs"
         -- Pri index
@@ -211,9 +212,13 @@ snapshot base name path = do
     extP <- backend statCh base Nothing
     with extP $ \extCh -> do
       send statCh $ Say "Taking snapshot"
-      goSnapshot statCh extCh pri repo path
+      nodes <- goSnapshot statCh extCh pri repo path Nothing
       send statCh $ Say "Saving internal state"
-      goSnapshot statCh extCh sec repo $ pri </> repo
+      goSnapshot statCh extCh sec repo (pri </> repo) $
+        Just $ concat $ [
+          ["root"],
+          map (byteStringToFileName.encode) nodes,
+          ["_bloom"]]
       with (snapP base) $ \snapCh ->
         recordSnapshot snapCh extCh name $ sec </> repo
 
@@ -349,7 +354,7 @@ inspect cb base name version mbdir = do
 
 
 
-goSnapshot statCh extCh base repo path = do
+goSnapshot statCh extCh base repo path mfiles = do
   let idx       = base </> "idx"
       repodir   = base </> repo
       irollback = idx </> "rollback"
@@ -380,14 +385,18 @@ goSnapshot statCh extCh base repo path = do
   ksCh <- spawn' $ replicateB 3 -- TODO: paramaterise
           (ksP kiCh -|- hsP hiCh -|- bsP extCh)
   removeMissing kiCh
+  let sourceP = case mfiles of
+        Nothing    -> traverse statCh path
+        Just files -> statFiles statCh path files
+
   send statCh $ Say "  Calculating size"
-  totSize <- runResourceT $ traverse statCh path $$ sumFileSize
+  totSize <- runResourceT $ sourceP $$ sumFileSize
   send statCh $ Say "  Transferring"
   send statCh $ SetGoal $ fromIntegral totSize
   -- start cleaner
   pid <- forkIO $ rollbackCleaner rrollback ksCh kiCh hiCh
   -- insert keys!
-  runResourceT $ traverse statCh path $= CE.group 1024 $$
+  runResourceT $ sourceP $= CE.group 1024 $$
     CL.mapM_ (sendFiles rrollback ksCh)
   -- stop cleaner
   killThread pid
@@ -398,7 +407,9 @@ goSnapshot statCh extCh base repo path = do
   -- release "locks"
   mapM_ removeDirectoryRecursive
     [irollback, rrollback]
+  nodes <- sendReply kiCh Idx.ListNodes
   Ch.sendP wsup Stop
+  return nodes
   where
     flush ksCh kiCh hiCh = do
         flushChannel ksCh -- Flush from chain to trees and externally
@@ -421,7 +432,8 @@ goSnapshot statCh extCh base repo path = do
 
     toKey = pack . makeRelative path
 
-    sendFiles dir ksCh lst = do
+    sendFiles dir ksCh lst' = do
+      let lst = if isJust mfiles then lst' else sortBy (comparing fst) lst'
       uid <- show `fmap` uuid
       safeWriteFileWith id (dir </> uid) $ encode $ map (toKey.fst) lst
       mapM_ (sendFile ksCh) lst
@@ -452,6 +464,35 @@ goSnapshot statCh extCh base repo path = do
             send kiCh $ Idx.Delete file
 
 sumFileSize = CL.fold (\n (_, stat) -> n + fileSize stat) 0
+
+statFiles statCh path files =
+  Source
+  { sourcePull  = pull files
+  , sourceClose = return ()
+  }
+  where
+    src state = Source (pull state) (return ())
+    pull state = do
+      res <- pull0 state
+      return $ case res of
+        StateClosed -> Closed
+        StateOpen state' val -> Open (src state') val
+    pull0 [] = return StateClosed
+    pull0 (x:xs) = do
+      case x of
+        ".." -> pull0 xs
+        "."  -> pull0 xs
+        file -> do
+          let path' = path </> file
+          send statCh $ SetMessage path'
+          estat <- liftIO $ try $ getSymbolicLinkStatus path'
+          case estat of
+            Left (e :: SomeException) -> do
+              liftIO $ Log.warning "StatFiles" $ "Skipping file: " ++ path ++
+                "--" ++ show e
+              pull0 xs
+            Right stat
+              | isRegularFile stat -> return $ StateOpen xs (path', stat)
 
 traverse statCh path =
   Source

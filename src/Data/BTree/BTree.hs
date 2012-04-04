@@ -62,6 +62,7 @@ module Data.BTree.BTree
        , findMin
        , findMax
        , height
+       , listNodes
        ) where
 
 import Data.BTree.Types
@@ -635,3 +636,34 @@ search f = do p  <- ask
           where
             rest = findInts (n+1) (ub:xs)
         findInts _ _ = []
+
+
+listNodes :: (MonadIO m, TreeBackend mc k v, Key k, Value v)
+          => TreeResult m mc k v [Ref (Node k v)]         -- ^ A list of node names
+listNodes = do p <- ask
+               r <- root' p
+               go p [r] [] []
+  where
+    go p []     [] res = return $! reverse res
+    go p []     ys res = go p (concat $ reverse ys) [] res
+    go p (x:xs) ys res = do
+      n <- liftIO $ C.eval (state p) $ fetch' x
+      case n of
+        Leaf   ks    -> go p xs ys $! x : res
+        Branch ks rs -> go p xs (reverse rs : ys) $! x : res
+
+
+-- listNodes alternative that lists the nodes breadth-first:
+--
+-- listNodes :: (MonadIO m, TreeBackend mc k v, Key k, Value v)
+--           => TreeResult m mc k v [Ref (Node k v)]         -- ^ A list of node names
+-- listNodes = do p <- ask
+--                r <- root' p
+--                go p r
+--   where
+--     go p r = do
+--       n <- liftIO $ C.eval (state p) $ fetch' r
+--       case n of
+--         Leaf   ks    -> return [r]
+--         Branch ks rs -> do rest <- mapM (go p) rs
+--                            return $! r : concat rest

@@ -56,6 +56,7 @@ data Message k v
   | forall a. Foldli (a -> k -> v -> a) !a !(Reply a)
   | forall a. Foldri (k -> v -> a -> a) !a !(Reply a)
   | forall m. Monad m => Mapi_ (k -> v -> m ()) !(Reply (m ()))
+  | ListNodes !(Reply [Ref (Node k v)])
 
 
 cacheSize = 16
@@ -101,6 +102,8 @@ index dir runBackend = newM (hSup, hMsg, init, hFlush, run)
         Foldli f a rep -> replyTo rep =<< (withTree $ T.foldli f a)
         Foldri f a rep -> replyTo rep =<< (withTree $ T.foldri f a)
         Mapi_ f rep -> replyTo rep =<< (withTree $ (T.foldli (\a k v -> a >> f k v)) $ return ())
+
+        ListNodes rep -> replyTo rep =<< (withTree T.listNodes)
 
     hFlush = do (p, l, _) <- get
                 liftIO $ saveIO p l

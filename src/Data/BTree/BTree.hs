@@ -652,7 +652,7 @@ listNodes = do p <- ask
   where
     pack p r = do
       cs <- go p 64 r
-      mapM (pack p) cs
+      mapM_ (pack p) cs
 
     go p 1 r = do
       tell [r]
@@ -660,6 +660,7 @@ listNodes = do p <- ask
       case n of
         Leaf   _    -> return []
         Branch _ cs -> return cs
+
     go p h r = do
       let h' = h `div` 2
       cs <- go p h' r

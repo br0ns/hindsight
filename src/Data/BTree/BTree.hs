@@ -72,6 +72,7 @@ import Control.Concurrent
 import Control.Concurrent.STM
 import Control.Exception
 import Control.Monad.Reader
+import Control.Monad.Writer
 import Control.Monad.Trans
 import System.Random (randomIO)
 
@@ -638,32 +639,59 @@ search f = do p  <- ask
         findInts _ _ = []
 
 
+
+
+
+-- | A list of node references fit for packing
+-- | The list follows the van Emde Boas layout
 listNodes :: (MonadIO m, TreeBackend mc k v, Key k, Value v)
           => TreeResult m mc k v [Ref (Node k v)]         -- ^ A list of node names
 listNodes = do p <- ask
                r <- root' p
-               go p [r] [] []
+               execWriterT $ pack p r
   where
-    go p []     [] res = return $! reverse res
-    go p []     ys res = go p (concat $ reverse ys) [] res
-    go p (x:xs) ys res = do
-      n <- liftIO $ C.eval (state p) $ fetch' x
+    pack p r = do
+      cs <- go p 64 r
+      mapM (pack p) cs
+
+    go p 1 r = do
+      tell [r]
+      n <- liftIO $ C.eval (state p) $ fetch' r
       case n of
-        Leaf   ks    -> go p xs ys $! x : res
-        Branch ks rs -> go p xs (reverse rs : ys) $! x : res
+        Leaf   _    -> return []
+        Branch _ cs -> return cs
+    go p h r = do
+      let h' = h `div` 2
+      cs <- go p h' r
+      liftM concat $ mapM (go p h') cs
+
+--- listNodes alternative that lists the nodes breadth-first:
+---
+--- listNodes :: (MonadIO m, TreeBackend mc k v, Key k, Value v)
+---           => TreeResult m mc k v [Ref (Node k v)]         -- ^ A list of node names
+--- listNodes = do p <- ask
+---                r <- root' p
+---                go p r
+---   where
+---     go p r = do
+---       n <- liftIO $ C.eval (state p) $ fetch' r
+---       case n of
+---         Leaf   ks    -> return [r]
+---         Branch ks rs -> do rest <- mapM (go p) rs
+---                            return $! r : concat rest
 
 
--- listNodes alternative that lists the nodes breadth-first:
---
+-- listNodes alternative that uses depth first
 -- listNodes :: (MonadIO m, TreeBackend mc k v, Key k, Value v)
 --           => TreeResult m mc k v [Ref (Node k v)]         -- ^ A list of node names
 -- listNodes = do p <- ask
 --                r <- root' p
---                go p r
+--                go p [r] [] []
 --   where
---     go p r = do
---       n <- liftIO $ C.eval (state p) $ fetch' r
+--     go p []     [] res = return $! reverse res
+--     go p []     ys res = go p (concat $ reverse ys) [] res
+--     go p (x:xs) ys res = do
+--       n <- liftIO $ C.eval (state p) $ fetch' x
 --       case n of
---         Leaf   ks    -> return [r]
---         Branch ks rs -> do rest <- mapM (go p) rs
---                            return $! r : concat rest
+--         Leaf   ks    -> go p xs ys $! x : res
+--         Branch ks rs -> go p xs (reverse rs : ys) $! x : res

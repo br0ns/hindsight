@@ -32,6 +32,7 @@ import Process
 import Supervisor
 import qualified Process.Stats as Stats
 
+import qualified Codec.Compression.Zlib as Zlib
 import qualified Codec.Compression.Snappy as Snappy
 
 import System.Process
@@ -90,11 +91,15 @@ external statCh masterKey mbbufdir modDir = new (handleSup, handleMsg, info "Sta
 
     comp   = case compressionMode of
                   Snappy         -> Snappy.compress
+                  GZip           -> withLazy Zlib.compress
                   CompressionOff -> id
 
     decomp = case compressionMode of
                   Snappy         -> Snappy.decompress
+                  GZip           -> withLazy Zlib.decompress
                   CompressionOff -> id
+
+    withLazy f = B.concat . BL.toChunks . f . BL.fromChunks . return
 
     proc cmd args input = do
       (hIn, hOut, hErr, hProc) <- runInteractiveProcess (modDir </> cmd) args

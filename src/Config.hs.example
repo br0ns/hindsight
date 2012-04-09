@@ -25,7 +25,7 @@ chunkMode = Fixed
 
 -- Compressions of blobs (default: GZip)
 -- (This will not affect internal compression of tree nodes)
-data CompressionMode = CompressionOff | GZip
+data CompressionMode = CompressionOff | Snappy | GZip
                      deriving Eq
 
 compressionMode = GZip

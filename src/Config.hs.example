@@ -5,7 +5,7 @@ hindsightBase = "~/.hindsight"
 
 -- The module to use for external storage
 -- See example modules in the "modules/" directory
-backendModule = "~/.hindsight/modules/local"
+backendModule = "~/.hindsight-modules/local"
 
 
 -- Debugging (default: DebugOff)

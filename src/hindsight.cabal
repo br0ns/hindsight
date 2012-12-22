@@ -54,40 +54,40 @@ executable hindsight
     c-sources: cbits/rollsum.c cbits/term.c
 
     build-depends:
-        base == 4.*, hslogger == 1.*
+        base >= 4, hslogger >= 1
         ,
         -- control
-        mtl == 2.*, stm == 2.2.*
+        mtl >= 2, stm >= 2.2
         ,
         -- util
-        MissingH == 1.1.*, old-time == 1.*, process == 1.*, random == 1.*,
-        time == 1.*, utility-ht == 0.0.7.*
+        MissingH >= 1.1, old-time >= 1, process >= 1, random >= 1,
+        time >= 1, utility-ht >= 0.0.7
         ,
         -- data structures
-        array == 0.4.*, containers == 0.4.*, hashable == 1.*
+        array >= 0.4, containers >= 0.4, hashable >= 1
         ,
         -- packing
-        snappy == 0.2.*, tar == 0.3.*, zlib == 0.5.*
+        snappy >= 0.2, tar >= 0.3, zlib >= 0.5
         ,
         -- conduit
-        conduit == 0.2.*
+        conduit >= 0.2
         ,
         -- bytestring
-        bytestring == 0.9.*, base16-bytestring == 0.1.*, base64-bytestring == 0.1.1.0,
-        cereal == 0.3.*
+        bytestring >= 0.9, base16-bytestring >= 0.1, base64-bytestring >= 0.1,
+        cereal >= 0.3
         ,
         -- unix
-        unix == 2.5.*, Unixutils == 1.*
+        unix >= 2.5, Unixutils >= 1
         ,
         -- files
-        directory == 1.*, filepath == 1.*
+        directory >= 1, filepath >= 1
         ,
         -- crypto
-        crypto-api == 0.10.*, cprng-aes == 0.2.*, entropy >= 0.2.0, salt == 0.0,
-        skein == 0.1.*
+        crypto-api >= 0.10, cprng-aes >= 0.2, entropy >= 0.2, salt >= 0.0,
+        skein >= 0.1
         ,
         -- bloom filter
-        bloomfilter == 1.*
+        bloomfilter >= 1
 
     if true
         ghc-options:    -funbox-strict-fields -Wall -fno-warn-hi-shadowing -fno-warn-name-shadowing
@@ -101,4 +101,3 @@ executable hindsight
         cpp-options:    -DTESTING
         build-depends:  QuickCheck == 2.4.*
         ghc-options:    -Wall
-

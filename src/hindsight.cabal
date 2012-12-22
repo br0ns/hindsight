@@ -83,7 +83,7 @@ executable hindsight
         directory == 1.*, filepath == 1.*
         ,
         -- crypto
-        crypto-api == 0.8.*, cprng-aes == 0.2.*, entropy >= 0.2.0, salt == 0.0,
+        crypto-api == 0.10.*, cprng-aes == 0.2.*, entropy >= 0.2.0, salt == 0.0,
         skein == 0.1.*
         ,
         -- bloom filter

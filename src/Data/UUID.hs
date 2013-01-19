@@ -9,6 +9,8 @@ module Data.UUID
        where
 
 
+import Control.Applicative
+
 import Data.Word
 import Text.Printf
 import Control.Concurrent
@@ -16,8 +18,8 @@ import Data.Typeable
 
 import qualified Data.Char as C
 import qualified Crypto.Random.AESCtr as Prng
-import System.Entropy
 
+import System.Entropy
 import Data.Serialize
 
 import System.IO.Unsafe
@@ -55,8 +57,7 @@ uuid =
      case ls of
        (x:xs) -> do putMVar uuids xs
                     return x
-       [] -> do ent <- getEntropy 64
-                let Right gen = Prng.make ent
+       [] -> do Just gen <- Prng.make <$> getEntropy 64
                 putMVar uuids $ map UUID $ map fst $
                   {- always skip first -}
                   tail $ iterate (\(_, gen') -> Prng.genRandomBytes gen' 16) (B.empty, gen)
